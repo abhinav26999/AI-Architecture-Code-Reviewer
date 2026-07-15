@@ -1,0 +1,5 @@
+2026-07-15 13:54:45,662 [INFO] app: Incoming Request: GET / from 127.0.0.1
+2026-07-15 13:54:45,675 [INFO] app: Request Success: GET / | Status: 200 | Duration: 12.62ms
+2026-07-15 14:03:33,443 [INFO] app: Incoming Request: GET /api/v1/github/test-auth from 127.0.0.1
+2026-07-15 14:03:34,144 [INFO] httpx: HTTP Request: GET https://api.github.com/app/installations "HTTP/1.1 200 OK"
+2026-07-15 14:03:34,199 [INFO] app: Request Success: GET /api/v1/github/test-auth | Status: 200 | Duration: 756.68ms
