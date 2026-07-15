@@ -3,3 +3,9 @@
 2026-07-15 14:03:33,443 [INFO] app: Incoming Request: GET /api/v1/github/test-auth from 127.0.0.1
 2026-07-15 14:03:34,144 [INFO] httpx: HTTP Request: GET https://api.github.com/app/installations "HTTP/1.1 200 OK"
 2026-07-15 14:03:34,199 [INFO] app: Request Success: GET /api/v1/github/test-auth | Status: 200 | Duration: 756.68ms
+2026-07-15 17:17:28,533 [INFO] app: Incoming Request: POST /api/v1/graph/analyze-repo from 127.0.0.1
+2026-07-15 17:17:29,101 [INFO] httpx: HTTP Request: POST https://api.github.com/app/installations/146529233/access_tokens "HTTP/1.1 201 Created"
+2026-07-15 17:17:29,103 [INFO] app.services.ingestion.cloner: Cloning abhinav26999/nuktitalent-backend (depth=1) into /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7...
+2026-07-15 17:17:30,515 [INFO] app.services.ingestion.cloner: Successfully cloned abhinav26999/nuktitalent-backend to /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7
+2026-07-15 17:17:30,664 [INFO] app.services.ingestion.cloner: Cleaned up clone path: /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7
+2026-07-15 17:17:30,666 [INFO] app: Request Success: POST /api/v1/graph/analyze-repo | Status: 200 | Duration: 2133.15ms

@@ -8,3 +8,4 @@ python-dotenv>=1.0.1
 tree-sitter==0.26.0
 tree-sitter-python==0.25.0
 tree-sitter-typescript==0.23.2
+networkx==3.6.1

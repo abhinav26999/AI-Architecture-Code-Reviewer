@@ -1,13 +1,14 @@
 INFO:     Will watch for changes in these directories: ['/Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend']
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [51533] using WatchFiles
-INFO:     Started server process [51535]
+INFO:     Started reloader process [53331] using WatchFiles
+INFO:     Started server process [53414]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-2026-07-15 13:54:45,662 [INFO] app: Incoming Request: GET / from 127.0.0.1
-2026-07-15 13:54:45,675 [INFO] app: Request Success: GET / | Status: 200 | Duration: 12.62ms
-INFO:     127.0.0.1:51846 - "GET / HTTP/1.1" 200 OK
-2026-07-15 14:03:33,443 [INFO] app: Incoming Request: GET /api/v1/github/test-auth from 127.0.0.1
-2026-07-15 14:03:34,144 [INFO] httpx: HTTP Request: GET https://api.github.com/app/installations "HTTP/1.1 200 OK"
-2026-07-15 14:03:34,199 [INFO] app: Request Success: GET /api/v1/github/test-auth | Status: 200 | Duration: 756.68ms
-INFO:     127.0.0.1:51889 - "GET /api/v1/github/test-auth HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [53414]
+INFO:     Started server process [53451]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

@@ -4,7 +4,7 @@ from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import github, ingest
+from app.api.routes import github, ingest, graph
 
 # Configure Logging (Writes to backend/app.log and console)
 log_file = "app.log"
@@ -69,6 +69,12 @@ app.include_router(
     ingest.router,
     prefix=f"{settings.API_V1_STR}/ingest",
     tags=["ingest"],
+)
+
+app.include_router(
+    graph.router,
+    prefix=f"{settings.API_V1_STR}/graph",
+    tags=["graph"],
 )
 
 
