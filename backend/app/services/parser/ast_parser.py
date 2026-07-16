@@ -53,6 +53,8 @@ class ASTParser:
             # Default to Python if unknown, or raise error
             raise ValueError(f"Unsupported file extension for parsing: {ext}")
 
+        logger.info(f"ASTParser: Parsing file '{filename}' with extension '{ext}'")
+
         code_bytes = code.encode("utf-8")
         parser = tree_sitter.Parser(lang)
         tree = parser.parse(code_bytes)
@@ -72,6 +74,8 @@ class ASTParser:
         except Exception as e:
             logger.exception(f"Error parsing metadata for {filename}")
             raise ValueError(f"AST traversal failed: {str(e)}")
+
+        logger.info(f"ASTParser: Parsed '{filename}' -> Found {len(imports)} imports, {len(classes)} classes, {len(functions)} functions.")
 
         return ParsedFile(
             file_path=filename,

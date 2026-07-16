@@ -46,10 +46,12 @@ class RuleEngine:
 
     def check_layer_boundaries(self, graph: DependencyGraphResponse) -> List[RuleViolation]:
         """Validates directed imports in the graph against forbidden layering rules."""
+        logger.info("RuleEngine: Checking layer boundary imports on Dependency Graph...")
         violations: List[RuleViolation] = []
 
         # Find circular dependencies
         for cycle in graph.circular_dependencies:
+            logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Circular dependency cycle: {' -> '.join(cycle)}")
             violations.append(RuleViolation(
                 rule_name="Circular Dependency",
                 severity="CRITICAL",
@@ -65,6 +67,7 @@ class RuleEngine:
 
             # Rule 1: Controller layer must NOT directly import Repository/Model
             if src_layer == "controller" and tgt_layer == "repository":
+                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Layer Boundary Error - Controller '{edge.source}' imports Repository/Model '{edge.target}' directly.")
                 violations.append(RuleViolation(
                     rule_name="Layer Boundary Check",
                     severity="CRITICAL",
@@ -75,6 +78,7 @@ class RuleEngine:
 
             # Rule 2: Repository/Model layer must NOT import Services or Controllers
             elif src_layer == "repository" and tgt_layer in ("service", "controller"):
+                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Reverse Dependency Error - Repository '{edge.source}' imports '{edge.target}'.")
                 violations.append(RuleViolation(
                     rule_name="Layer Boundary Check",
                     severity="CRITICAL",
@@ -85,6 +89,7 @@ class RuleEngine:
 
             # Rule 3: Service layer must NOT import Controllers
             elif src_layer == "service" and tgt_layer == "controller":
+                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Reverse Dependency Error - Service '{edge.source}' imports Controller '{edge.target}'.")
                 violations.append(RuleViolation(
                     rule_name="Layer Boundary Check",
                     severity="CRITICAL",
@@ -103,6 +108,7 @@ class RuleEngine:
         parser_lang: tree_sitter.Language
     ) -> List[RuleViolation]:
         """Parses file contents to run AST-level performance and safety checkers."""
+        logger.info(f"RuleEngine: Checking AST rules for '{file_path}' (Language: {language})")
         violations: List[RuleViolation] = []
         code_bytes = content.encode("utf-8")
         
@@ -149,6 +155,7 @@ class RuleEngine:
                     # Rule A: N+1 Database Operation in Loops
                     if loop_depth > 0:
                         if any(pat in call_text.lower() for pat in db_patterns):
+                            logger.warning(f"RuleEngine: [HIGH VIOLATION] N+1 Query in '{file_path}' at line {node.start_point[0] + 1}: call '{call_text}'")
                             violations.append(RuleViolation(
                                 rule_name="N+1 Query Detector",
                                 severity="HIGH",
@@ -161,6 +168,7 @@ class RuleEngine:
                     if async_depth > 0:
                         if language == "python":
                             if any(pat in call_text for pat in blocking_patterns_py):
+                                logger.warning(f"RuleEngine: [MEDIUM VIOLATION] Blocking call '{call_text}' in async scope in '{file_path}' at line {node.start_point[0] + 1}")
                                 violations.append(RuleViolation(
                                     rule_name="Blocking Async Scope",
                                     severity="MEDIUM",
@@ -170,6 +178,7 @@ class RuleEngine:
                                 ))
                         else:  # JS/TS
                             if any(pat in call_text for pat in blocking_patterns_ts):
+                                logger.warning(f"RuleEngine: [MEDIUM VIOLATION] Blocking FS/subprocess call '{call_text}' in async scope in '{file_path}' at line {node.start_point[0] + 1}")
                                 violations.append(RuleViolation(
                                     rule_name="Blocking Async Scope",
                                     severity="MEDIUM",
@@ -194,6 +203,7 @@ class RuleEngine:
         clone_path: str
     ) -> ArchitectureReviewResponse:
         """Runs the rule engine review over all files and computes the final architecture score."""
+        logger.info(f"RuleEngine: Starting architecture scan for repository '{owner}/{repo}'...")
         violations: List[RuleViolation] = []
 
         # 1. Run Graph-based boundary checks
@@ -211,12 +221,9 @@ class RuleEngine:
             
             if os.path.exists(full_file_path):
                 try:
-                    with open(full_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    
                     violations.extend(self.check_ast_rules(
                         file_path=parsed.file_path,
-                        content=content,
+                        content=open(full_file_path, "r", encoding="utf-8", errors="ignore").read(),
                         language=lang_name,
                         parser_lang=parser_lang
                     ))
@@ -236,6 +243,7 @@ class RuleEngine:
                 score -= 2
 
         score = max(0.0, score)
+        logger.info(f"RuleEngine: Completed review for '{owner}/{repo}'. Score: {score}/100. Total violations found: {len(violations)}")
 
         return ArchitectureReviewResponse(
             owner=owner,
