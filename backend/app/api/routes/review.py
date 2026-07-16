@@ -213,7 +213,8 @@ async def analyze_and_review_pr(request: PRReviewRequest):
         review_comment = await ai_client.generate_pr_review(
             diffs=diffs_str,
             violations=violations_messages,
-            related_incidents=incidents_found
+            related_incidents=incidents_found,
+            score=review_results.score
         )
 
         # 8. Post review comment to GitHub PR

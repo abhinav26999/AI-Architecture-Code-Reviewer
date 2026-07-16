@@ -287,15 +287,12 @@ class RuleEngine:
             full_file_path = os.path.join(clone_path, parsed.file_path)
             
             if os.path.exists(full_file_path):
-                try:
-                    violations.extend(await self.check_ast_rules(
-                        file_path=parsed.file_path,
-                        content=open(full_file_path, "r", encoding="utf-8", errors="ignore").read(),
-                        language=lang_name,
-                        parser_lang=parser_lang
-                    ))
-                except Exception as e:
-                    logger.error(f"Failed to scan AST rules on file {parsed.file_path}: {e}")
+                violations.extend(await self.check_ast_rules(
+                    file_path=parsed.file_path,
+                    content=open(full_file_path, "r", encoding="utf-8", errors="ignore").read(),
+                    language=lang_name,
+                    parser_lang=parser_lang
+                ))
 
         # 3. Calculate architectural health score
         score = 100.0

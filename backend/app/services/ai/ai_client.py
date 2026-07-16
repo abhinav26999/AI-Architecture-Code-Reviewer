@@ -12,23 +12,24 @@ class AIClient:
         self,
         diffs: str,
         violations: List[str],
-        related_incidents: List[str]
+        related_incidents: List[str],
+        score: float
     ) -> str:
         """
         Generates a comprehensive architectural code review critique in Markdown
         using the configured LLM provider.
         """
         if settings.LLM_PROVIDER == "ollama":
-            return await self._generate_ollama_review(diffs, violations, related_incidents)
+            return await self._generate_ollama_review(diffs, violations, related_incidents, score)
         else:
-            logger.warning(f"Unsupported LLM provider '{settings.LLM_PROVIDER}'. Returning mock review.")
-            return self._get_mock_review(diffs, violations)
+            raise ValueError(f"Unsupported or unconfigured LLM provider '{settings.LLM_PROVIDER}'.")
 
     async def _generate_ollama_review(
         self,
         diffs: str,
         violations: List[str],
-        related_incidents: List[str]
+        related_incidents: List[str],
+        score: float
     ) -> str:
         """Connects to local Ollama instance to generate the architectural review."""
         system_prompt = (
@@ -46,6 +47,7 @@ class AIClient:
         incidents_str = "\n".join(f"- {inc}" for inc in related_incidents) if related_incidents else "No related incidents matching historical outages found."
 
         user_prompt = (
+            f"### Repository Architectural Score: {score}/100\n\n"
             f"### Changed Code Diffs:\n{diffs}\n\n"
             f"### Deterministic Rule Violations:\n{violations_str}\n\n"
             f"### Historical Post-Mortem Incident Context:\n{incidents_str}\n\n"
@@ -82,8 +84,7 @@ class AIClient:
                     )
         except Exception as e:
             logger.error(f"Failed to query Ollama for review generation: {e}")
-            logger.info("Falling back to structured mock review.")
-            return self._get_mock_review(diffs, violations)
+            raise e
 
     async def scan_file_ast_rules(
         self,
@@ -147,18 +148,23 @@ class AIClient:
                     logger.warning(f"Ollama returned status code {response.status_code} in scan_file_ast_rules")
         except Exception as e:
             logger.error(f"Failed to query Ollama for file scan on '{file_path}': {e}")
-        
-        return []
+            raise e
 
-    def _get_mock_review(self, diffs: str, violations: List[str]) -> str:
+    def _get_mock_review(self, diffs: str, violations: List[str], score: float) -> str:
         """Returns a cleanly formatted fallback review if the LLM cannot be accessed."""
         violations_str = "\n".join(f"- {v}" for v in violations) if violations else "No static violations found."
         
+        risk = "LOW"
+        if score < 70:
+            risk = "CRITICAL"
+        elif score < 90:
+            risk = "MEDIUM"
+            
         return (
             "## 🤖 Antigravity Architecture Code Review (Offline Mock)\n\n"
             "### 📊 Summary & Score\n"
-            "- **Architectural Score**: 85/100\n"
-            "- **Risk Assessment**: MEDIUM\n"
+            f"- **Architectural Score**: {score}/100\n"
+            f"- **Risk Assessment**: {risk}\n"
             "- *Note: Local Ollama server is offline or unreachable. Displaying deterministic engine results.*\n\n"
             "### ⚠️ Violations & Structural Concerns\n"
             f"{violations_str}\n\n"
