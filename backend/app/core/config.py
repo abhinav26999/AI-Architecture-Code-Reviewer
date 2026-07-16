@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "ollama"
     OLLAMA_GEN_MODEL: str = "llama3"
     OLLAMA_GEN_URL: str = "http://localhost:11434/api/generate"
-
     @property
     def resolved_temp_clone_dir(self) -> str:
         """Returns the absolute path of the clone directory, resolved relative to backend root if relative."""
