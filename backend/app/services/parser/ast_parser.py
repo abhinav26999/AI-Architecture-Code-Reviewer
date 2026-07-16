@@ -50,8 +50,14 @@ class ASTParser:
         lang = self.get_language_for_extension(ext)
         
         if not lang:
-            # Default to Python if unknown, or raise error
-            raise ValueError(f"Unsupported file extension for parsing: {ext}")
+            logger.info(f"ASTParser: Extension '{ext}' is not supported by Tree-sitter. Returning raw parsed metadata container.")
+            return ParsedFile(
+                file_path=filename,
+                language="other",
+                imports=[],
+                classes=[],
+                functions=[]
+            )
 
         logger.info(f"ASTParser: Parsing file '{filename}' with extension '{ext}'")
 

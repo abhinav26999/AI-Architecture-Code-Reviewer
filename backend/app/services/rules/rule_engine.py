@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from app.schemas.graph import DependencyGraphResponse
 from app.schemas.parser import ParsedFile
 from app.schemas.rules import RuleViolation, ArchitectureReviewResponse
+from app.services.ai.ai_client import ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -143,14 +144,31 @@ class RuleEngine:
             logger.info("RuleEngine: Layer boundary checks completed successfully! No violations found.")
         return violations
 
-    def check_ast_rules(
+    async def check_ast_rules(
         self,
         file_path: str,
         content: str,
         language: str,
-        parser_lang: tree_sitter.Language
+        parser_lang: Optional[tree_sitter.Language]
     ) -> List[RuleViolation]:
-        """Parses file contents to run AST-level performance and safety checkers."""
+        """Parses file contents to run AST-level performance and safety checkers (uses Tree-sitter or AI fallback)."""
+        # If parser_lang is not available, delegate to AI-Driven Inspector
+        if not parser_lang:
+            logger.info(f"RuleEngine: No AST parser for language '{language}'. Delegating to AI-Driven Inspector...")
+            ai_violations = await ai_client.scan_file_ast_rules(file_path, content)
+            violations = []
+            for v in ai_violations:
+                violations.append(RuleViolation(
+                    rule_name=v.get("rule_name", "AI Rule Check"),
+                    severity=v.get("severity", "MEDIUM"),
+                    file_path=file_path,
+                    line=v.get("line", 1),
+                    message=v.get("message", "AI flagged architectural concern.")
+                ))
+            if len(violations) == 0:
+                logger.info(f"RuleEngine: AI rule checks completed successfully for '{file_path}'. No violations found.")
+            return violations
+
         logger.info(f"RuleEngine: Checking AST rules for '{file_path}' (Language: {language})")
         violations: List[RuleViolation] = []
         code_bytes = content.encode("utf-8")
@@ -239,7 +257,7 @@ class RuleEngine:
             logger.info(f"RuleEngine: AST rule checks completed successfully for '{file_path}'. No violations found.")
         return violations
 
-    def run_review(
+    async def run_review(
         self,
         owner: str,
         repo: str,
@@ -259,15 +277,18 @@ class RuleEngine:
         for parsed in parsed_files:
             ext = os.path.splitext(parsed.file_path)[1]
             mapped = self.lang_map.get(ext.lower())
+            
             if not mapped:
-                continue
+                lang_name = ext.lower().replace(".", "")
+                parser_lang = None
+            else:
+                lang_name, parser_lang = mapped
 
-            lang_name, parser_lang = mapped
             full_file_path = os.path.join(clone_path, parsed.file_path)
             
             if os.path.exists(full_file_path):
                 try:
-                    violations.extend(self.check_ast_rules(
+                    violations.extend(await self.check_ast_rules(
                         file_path=parsed.file_path,
                         content=open(full_file_path, "r", encoding="utf-8", errors="ignore").read(),
                         language=lang_name,

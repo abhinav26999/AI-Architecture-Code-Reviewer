@@ -87,7 +87,7 @@ async def analyze_codebase(request: ParseRepoRequest):
         )
 
         # 4. Run Rule Engine Checks
-        review_results = rule_engine.run_review(
+        review_results = await rule_engine.run_review(
             owner=request.owner,
             repo=request.repo,
             parsed_files=parsed_files,
@@ -184,7 +184,7 @@ async def analyze_and_review_pr(request: PRReviewRequest):
         )
 
         # 5. Run Rule Engine Checks
-        review_results = rule_engine.run_review(
+        review_results = await rule_engine.run_review(
             owner=request.owner,
             repo=request.repo,
             parsed_files=parsed_files,

@@ -18,7 +18,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Supported extensions
-SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+SUPPORTED_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".cpp", ".c", ".h", ".cs", ".php", ".swift", ".kt", ".dart"
+}
 
 
 @router.post("/parse-file", response_model=ParsedFile)

@@ -1,3 +1,4 @@
+import json
 import logging
 import httpx
 from typing import List, Optional
@@ -83,6 +84,71 @@ class AIClient:
             logger.error(f"Failed to query Ollama for review generation: {e}")
             logger.info("Falling back to structured mock review.")
             return self._get_mock_review(diffs, violations)
+
+    async def scan_file_ast_rules(
+        self,
+        file_path: str,
+        content: str
+    ) -> List[dict]:
+        """
+        Queries the local Ollama model in JSON format to perform a structural check
+        on code files of any language (including C, C++, Go, Rust, Java, etc.).
+        """
+        system_prompt = (
+            "You are an expert Static Code Analyzer. Your task is to scan the provided source code file and identify ONLY two specific architectural violations:\n\n"
+            "1. \"N+1 Query Detector\" (Severity: HIGH)\n"
+            "   - Trigger: A database query, SQL statement, or ORM operation (e.g., '.find()', '.query()', 'db.select()', 'session.save()', 'prisma.') executed inside a loop (like 'for', 'while', 'forEach', 'map', or list comprehension).\n\n"
+            "2. \"Blocking Async Scope\" (Severity: MEDIUM)\n"
+            "   - Trigger: A synchronous blocking function (e.g., 'sleep()', 'time.sleep()', 'fs.readFileSync()', 'execSync()') executed inside the body of an 'async' function.\n\n"
+            "CONSTRAINTS:\n"
+            "- Do not output any markdown code blocks, summary text, introduction, or explanations.\n"
+            "- You must respond ONLY with a valid JSON array of objects matching the schema below.\n"
+            "- If no violations are found, return an empty JSON array: []\n\n"
+            "JSON Schema:\n"
+            "[\n"
+            "  {\n"
+            "    \"rule_name\": \"N+1 Query Detector\" or \"Blocking Async Scope\",\n"
+            "    \"severity\": \"HIGH\" or \"MEDIUM\",\n"
+            "    \"line\": <line_number_integer>,\n"
+            "    \"message\": \"<description of what was called and why it is a violation>\"\n"
+            "  }\n"
+            "]"
+        )
+
+        user_prompt = (
+            f"File Path: {file_path}\n"
+            f"Source Code Content:\n"
+            f"```\n{content}\n```"
+        )
+
+        payload = {
+            "model": settings.OLLAMA_GEN_MODEL,
+            "prompt": user_prompt,
+            "system": system_prompt,
+            "stream": False,
+            "format": "json"
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    settings.OLLAMA_GEN_URL,
+                    json=payload,
+                    timeout=30.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    response_text = data.get("response", "[]").strip()
+                    parsed = json.loads(response_text)
+                    if isinstance(parsed, list):
+                        return parsed
+                    logger.warning(f"Ollama returned non-list JSON payload: {response_text}")
+                else:
+                    logger.warning(f"Ollama returned status code {response.status_code} in scan_file_ast_rules")
+        except Exception as e:
+            logger.error(f"Failed to query Ollama for file scan on '{file_path}': {e}")
+        
+        return []
 
     def _get_mock_review(self, diffs: str, violations: List[str]) -> str:
         """Returns a cleanly formatted fallback review if the LLM cannot be accessed."""
