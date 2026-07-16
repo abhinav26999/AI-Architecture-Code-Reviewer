@@ -201,6 +201,42 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
+    async def create_pull_request_review(
+        self,
+        installation_id: int,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        body: str,
+        event: str = "COMMENT"
+    ) -> Dict[str, Any]:
+        """Creates a Pull Request review containing the AI review comments."""
+        token = await self.get_installation_token(installation_id)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+        payload = {
+            "body": body,
+            "event": event
+        }
+
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code not in (200, 201):
+                    raise GitHubAPIError(
+                        f"Failed to post PR review comment: {response.text}",
+                        status_code=response.status_code,
+                        response_body=response.text
+                    )
+                return response.json()
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
 
 # Singleton instance
 github_client = GitHubClient()

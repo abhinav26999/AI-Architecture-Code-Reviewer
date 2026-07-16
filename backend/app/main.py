@@ -1,9 +1,12 @@
 import time
 import logging
+from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.core.config import settings
+from app.core.database import engine, Base
 from app.api.routes import github, ingest, graph, review
 
 # Configure Logging (Writes to backend/app.log and console)
@@ -18,11 +21,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Setup database: ensure pgvector extension is enabled and tables are created
+    try:
+        if "YOUR_DATABASE_PASSWORD" not in settings.DATABASE_URL:
+            async with engine.begin() as conn:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables and pgvector extension initialized successfully.")
+        else:
+            logger.warning("DATABASE_URL password is using placeholder. Skipping automatic table creation.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+        
+    yield
+    # Shutdown logic
+    await engine.dispose()
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API for AI Architecture Code Reviewer",
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 # HTTP Request Logging Middleware

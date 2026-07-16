@@ -1,0 +1,106 @@
+import logging
+import httpx
+from typing import List, Optional
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class AIClient:
+    async def generate_pr_review(
+        self,
+        diffs: str,
+        violations: List[str],
+        related_incidents: List[str]
+    ) -> str:
+        """
+        Generates a comprehensive architectural code review critique in Markdown
+        using the configured LLM provider.
+        """
+        if settings.LLM_PROVIDER == "ollama":
+            return await self._generate_ollama_review(diffs, violations, related_incidents)
+        else:
+            logger.warning(f"Unsupported LLM provider '{settings.LLM_PROVIDER}'. Returning mock review.")
+            return self._get_mock_review(diffs, violations)
+
+    async def _generate_ollama_review(
+        self,
+        diffs: str,
+        violations: List[str],
+        related_incidents: List[str]
+    ) -> str:
+        """Connects to local Ollama instance to generate the architectural review."""
+        system_prompt = (
+            "You are Antigravity, an expert AI Software Architect reviewing a developer's Pull Request.\n"
+            "Your task is to analyze the changed files (Git diffs), static analysis violations, and RAG post-mortem contexts.\n"
+            "Provide a clear architectural critique in Markdown format.\n"
+            "Include:\n"
+            "1. Architectural Risk Score (0-100) and brief review summary.\n"
+            "2. Critical concerns or rule violations found (with file path and lines).\n"
+            "3. Actionable code refactorings or fixes.\n"
+            "Keep the feedback direct, technical, and objective."
+        )
+
+        violations_str = "\n".join(f"- {v}" for v in violations) if violations else "No static violations found."
+        incidents_str = "\n".join(f"- {inc}" for inc in related_incidents) if related_incidents else "No related incidents matching historical outages found."
+
+        user_prompt = (
+            f"### Changed Code Diffs:\n{diffs}\n\n"
+            f"### Deterministic Rule Violations:\n{violations_str}\n\n"
+            f"### Historical Post-Mortem Incident Context:\n{incidents_str}\n\n"
+            f"Generate the architectural PR review:"
+        )
+
+        payload = {
+            "model": settings.OLLAMA_GEN_MODEL,
+            "prompt": user_prompt,
+            "system": system_prompt,
+            "stream": False
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    settings.OLLAMA_GEN_URL,
+                    json=payload,
+                    timeout=60.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Ollama return: {"response": "..."}
+                    if "response" in data:
+                        return data["response"]
+                    else:
+                        raise ValueError(f"Ollama response missing 'response' text: {data}")
+                else:
+                    raise httpx.HTTPStatusError(
+                        f"Ollama returned status code {response.status_code}",
+                        request=response.request,
+                        response=response
+                    )
+        except Exception as e:
+            logger.error(f"Failed to query Ollama for review generation: {e}")
+            logger.info("Falling back to structured mock review.")
+            return self._get_mock_review(diffs, violations)
+
+    def _get_mock_review(self, diffs: str, violations: List[str]) -> str:
+        """Returns a cleanly formatted fallback review if the LLM cannot be accessed."""
+        violations_str = "\n".join(f"- {v}" for v in violations) if violations else "No static violations found."
+        
+        return (
+            "## 🤖 Antigravity Architecture Code Review (Offline Mock)\n\n"
+            "### 📊 Summary & Score\n"
+            "- **Architectural Score**: 85/100\n"
+            "- **Risk Assessment**: MEDIUM\n"
+            "- *Note: Local Ollama server is offline or unreachable. Displaying deterministic engine results.*\n\n"
+            "### ⚠️ Violations & Structural Concerns\n"
+            f"{violations_str}\n\n"
+            "### 💡 Actionable Fixes\n"
+            "1. **Clean Architecture Boundary**: Avoid importing `src/db/db.ts` or database utilities directly inside controllers. Instead, inject a Service class layer (e.g. `src/services/applyJob.service.ts`) to handle query execution.\n"
+            "2. **N+1 Loops**: Ensure queries are batched using `In` operators or bulk inserts rather than executing model saves inside loop blocks."
+        )
+
+
+# Singleton instance
+ai_client = AIClient()
