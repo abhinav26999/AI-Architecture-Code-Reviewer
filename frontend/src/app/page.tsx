@@ -35,78 +35,9 @@ interface Repository {
   default_branch: string;
 }
 
-// -------------------------------------------------------------
-//                     MOCK DATA FOR FRONTEND
-// -------------------------------------------------------------
-const MOCK_REPOSITORIES: Repository[] = [
-  { name: "nuktitalent-backend", full_name: "abhinav26999/nuktitalent-backend", owner: { login: "abhinav26999" }, default_branch: "main" },
-  { name: "AI-Architecture-Reviewer", full_name: "abhinav26999/AI-Architecture-Code-Reviewer", owner: { login: "abhinav26999" }, default_branch: "main" }
-];
-
-const MOCK_VIOLATIONS: Violation[] = [
-  {
-    file_path: "src/controllers/applyJob.controller.ts",
-    line: 1,
-    rule_name: "Layer Boundary Check",
-    severity: "CRITICAL",
-    message: "Layer violation: Controller 'src/controllers/applyJob.controller.ts' imports Repository/Model 'src/db/db.ts' directly, bypassing Services.",
-    code_snippet: "import { db } from '../db/db';\nimport { Request, Response } from 'express';\n\nexport async function applyJob(req: Request, res: Response) {\n    const job = await db.query('SELECT * FROM jobs');\n}"
-  },
-  {
-    file_path: "src/services/userService.ts",
-    line: 10,
-    rule_name: "N+1 Query Detector",
-    severity: "HIGH",
-    message: "Performance bottleneck: Database or Repository operation 'prisma.user.findUnique' called inside a loop block.",
-    code_snippet: "for (const id of userIds) {\n    // Violates N+1 guidelines\n    const user = await prisma.user.findUnique({ where: { id } });\n    results.push(user);\n}"
-  },
-  {
-    file_path: "src/routes/auth.py",
-    line: 6,
-    rule_name: "Blocking Async Scope",
-    severity: "MEDIUM",
-    message: "Concurrency issue: Synchronous blocking filesystem/shell call 'time.sleep' executed inside an async scope.",
-    code_snippet: "import time\nfrom fastapi import APIRouter\n\nrouter = APIRouter()\n\n@router.post('/login')\nasync def login():\n    time.sleep(2) # Blocks event loop\n    return {'status': 'ok'}"
-  }
-];
-
-const MOCK_GRAPH = {
-  total_files: 5,
-  nodes: [
-    { file_path: "src/controllers/applyJob.controller.ts", language: "typescript", metrics: { afferent_coupling: 0, efferent_coupling: 2, instability: 1.0 } },
-    { file_path: "src/db/db.ts", language: "typescript", metrics: { afferent_coupling: 2, efferent_coupling: 0, instability: 0.0 } },
-    { file_path: "src/services/userService.ts", language: "typescript", metrics: { afferent_coupling: 1, efferent_coupling: 1, instability: 0.5 } },
-    { file_path: "src/routes/auth.py", language: "python", metrics: { afferent_coupling: 0, efferent_coupling: 1, instability: 1.0 } }
-  ],
-  edges: [
-    { source: "src/controllers/applyJob.controller.ts", target: "src/db/db.ts" },
-    { source: "src/services/userService.ts", target: "src/db/db.ts" }
-  ],
-  circular_dependencies: [],
-  average_instability: 0.625
-};
-
-const MOCK_AI_REVIEW = `## 🤖 Antigravity AI Code Review (PR #1)
-
-### 📊 Score: 85/100
-- **Risk Assessment**: MEDIUM
-
-### ⚠️ Violations & Structural Concerns
-- **Critical Layer Violation**: [src/controllers/applyJob.controller.ts](file:///Users/aeologicbuddy/Desktop/Clients%20Project/AI-Architecture-Code-Reviewer/backend/src/controllers/applyJob.controller.ts)
-  Controller directly imports \`db.ts\`. This bypasses service layer abstractions and leaks persistence details.
-
-### 💡 Refactoring Recommendations
-\`\`\`diff
-- import { db } from '../db/db';
-+ import { jobService } from '../services/job.service';
-...
-- const job = await db.query('SELECT * FROM jobs');
-+ const job = await jobService.applyToJob(req.body);
-\`\`\`
-`;
+// Live API Connection.
 
 export default function Home() {
-  const [mockMode, setMockMode] = useState<boolean>(false);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"overview" | "graph" | "review">("overview");
@@ -123,47 +54,29 @@ export default function Home() {
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [selectedNode, setSelectedNode] = useState<{ file_path: string; metrics: any } | null>(null);
 
-  // Load Repositories from backend if in Live Mode
+  // Load Repositories from backend
   useEffect(() => {
-    if (!mockMode) {
-      setIsLoading(true);
-      fetch("http://localhost:8000/api/v1/github/repositories")
-        .then((res) => {
-          if (!res.ok) throw new Error("Failed to load live repositories");
-          return res.json();
-        })
-        .then((data) => {
-          setRepositories(data);
-          if (data.length > 0) {
-            setSelectedRepo(data[0].name);
-          }
-        })
-        .catch((err) => {
-          console.error(err);
-          // Fallback to mock if API is down
-          setMockMode(true);
-        })
-        .finally(() => setIsLoading(false));
-    } else {
-      setRepositories(MOCK_REPOSITORIES);
-      setSelectedRepo(MOCK_REPOSITORIES[0].name);
-    }
-  }, [mockMode]);
+    setIsLoading(true);
+    fetch("http://localhost:8000/api/v1/github/repositories")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load live repositories");
+        return res.json();
+      })
+      .then((data) => {
+        setRepositories(data);
+        if (data.length > 0) {
+          setSelectedRepo(data[0].name);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
 
   // Run Codebase Analysis (Stage 1-4)
   const runAnalysis = async () => {
     setIsLoading(true);
-    if (mockMode) {
-      setTimeout(() => {
-        setScore(85);
-        setViolations(MOCK_VIOLATIONS);
-        setGraphData(MOCK_GRAPH);
-        setIsLoading(false);
-        confetti({ particleCount: 80, spread: 60 });
-      }, 1000);
-      return;
-    }
-
     try {
       const payload = {
         owner: "abhinav26999",
@@ -206,14 +119,6 @@ export default function Home() {
   const triggerPRReview = async () => {
     setIsReviewing(true);
     setAiReview("");
-
-    if (mockMode) {
-      setTimeout(() => {
-        setAiReview(MOCK_AI_REVIEW);
-        setIsReviewing(false);
-      }, 1200);
-      return;
-    }
 
     try {
       const payload = {
@@ -260,20 +165,9 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-4">
-            {/* Mode Switcher */}
-            <div className="flex items-center bg-zinc-800/80 rounded-lg p-1 border border-zinc-700 text-xs">
-              <button 
-                onClick={() => setMockMode(true)}
-                className={`px-3 py-1.5 rounded-md font-semibold transition-all ${mockMode ? "bg-indigo-600 text-white shadow" : "text-zinc-400 hover:text-zinc-200"}`}
-              >
-                Mock Data
-              </button>
-              <button 
-                onClick={() => setMockMode(false)}
-                className={`px-3 py-1.5 rounded-md font-semibold transition-all ${!mockMode ? "bg-indigo-600 text-white shadow" : "text-zinc-400 hover:text-zinc-200"}`}
-              >
-                Live API
-              </button>
+            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Live API Connected</span>
             </div>
           </div>
         </div>
