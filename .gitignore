@@ -1,0 +1,37 @@
+# Environments & Secrets
+.env
+*.pem
+*.key
+*.log
+server.pid
+backend/server.pid
+backend/app.log
+backend/uvicorn.log
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Node/JS dependencies & build output (for future modules)
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Temp clone directory
+backend/temp_clones/
+temp_clones/
+
+# OS files
+.DS_Store
