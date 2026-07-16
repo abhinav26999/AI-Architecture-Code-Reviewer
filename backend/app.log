@@ -3,3 +3,59 @@
 2026-07-15 14:03:33,443 [INFO] app: Incoming Request: GET /api/v1/github/test-auth from 127.0.0.1
 2026-07-15 14:03:34,144 [INFO] httpx: HTTP Request: GET https://api.github.com/app/installations "HTTP/1.1 200 OK"
 2026-07-15 14:03:34,199 [INFO] app: Request Success: GET /api/v1/github/test-auth | Status: 200 | Duration: 756.68ms
+2026-07-15 17:17:28,533 [INFO] app: Incoming Request: POST /api/v1/graph/analyze-repo from 127.0.0.1
+2026-07-15 17:17:29,101 [INFO] httpx: HTTP Request: POST https://api.github.com/app/installations/146529233/access_tokens "HTTP/1.1 201 Created"
+2026-07-15 17:17:29,103 [INFO] app.services.ingestion.cloner: Cloning abhinav26999/nuktitalent-backend (depth=1) into /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7...
+2026-07-15 17:17:30,515 [INFO] app.services.ingestion.cloner: Successfully cloned abhinav26999/nuktitalent-backend to /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7
+2026-07-15 17:17:30,664 [INFO] app.services.ingestion.cloner: Cleaned up clone path: /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_1f9b04cca7
+2026-07-15 17:17:30,666 [INFO] app: Request Success: POST /api/v1/graph/analyze-repo | Status: 200 | Duration: 2133.15ms
+2026-07-15 18:35:31,348 [INFO] app: Incoming Request: POST /api/v1/review/analyze from 127.0.0.1
+2026-07-15 18:35:31,932 [INFO] httpx: HTTP Request: POST https://api.github.com/app/installations/146529233/access_tokens "HTTP/1.1 201 Created"
+2026-07-15 18:35:31,934 [INFO] app.services.ingestion.cloner: Cloning abhinav26999/nuktitalent-backend (depth=1) into /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_374a00cdd3...
+2026-07-15 18:35:33,351 [INFO] app.services.ingestion.cloner: Successfully cloned abhinav26999/nuktitalent-backend to /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_374a00cdd3
+2026-07-15 18:35:33,442 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/index.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,443 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/middleware/validates.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,443 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/middleware/multerErrorHandler.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,443 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/middleware/upload.middleware.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,444 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/middleware/auth.middleware.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,444 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/config/cloudinary.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,444 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/jwt.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,445 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/statusCodes.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,445 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/email.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,445 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/expiry.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,446 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/statusMessages.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,446 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/appError.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,447 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/response.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,447 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/otp.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,448 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/utils/uploadResume.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,448 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/lib/ApiError.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,448 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/db/db.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,449 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/validators/job.validator.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,449 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/validators/applyJob.validator.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,450 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/validators/enquiry.validator.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,450 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/validators/auth.validator.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,450 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/controllers/auth.controler.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,451 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/controllers/enquiry.controller.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,451 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/controllers/applyJob.controller.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,451 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/controllers/job.controller.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,452 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/helper/otp-helper.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,452 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/routes/applyJob.routes.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,453 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/routes/job.routes.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,453 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/routes/enquiry.routes.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,453 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/routes/auth.routes.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,454 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/services/applyJob.service.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,454 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/services/auth.service.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,454 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/services/enquiry.service.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,455 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/services/job.service.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,455 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/auth/refresh-token.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,456 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/auth/jwt-payload.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,456 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/auth/login.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,456 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/auth/register.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,457 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/job/job.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,457 [ERROR] app.services.rules.rule_engine: Failed to scan AST rules on file src/interfaces/Enquiry/enquiry.interface.ts: 'tree_sitter.Parser' object has no attribute 'set_language'
+2026-07-15 18:35:33,484 [INFO] app.services.ingestion.cloner: Cleaned up clone path: /Users/aeologicbuddy/Desktop/Clients Project/AI-Architecture-Code-Reviewer/backend/temp_clones/abhinav26999_nuktitalent-backend_374a00cdd3
+2026-07-15 18:35:33,485 [INFO] app: Request Success: POST /api/v1/review/analyze | Status: 200 | Duration: 2137.87ms
+2026-07-15 18:35:44,948 [INFO] app: Incoming Request: GET /docs from 127.0.0.1
+2026-07-15 18:35:44,949 [INFO] app: Request Success: GET /docs | Status: 200 | Duration: 1.48ms
+2026-07-15 18:35:45,234 [INFO] app: Incoming Request: GET /api/v1/openapi.json from 127.0.0.1
+2026-07-15 18:35:45,342 [INFO] app: Request Success: GET /api/v1/openapi.json | Status: 200 | Duration: 108.49ms
