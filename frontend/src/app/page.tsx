@@ -106,21 +106,21 @@ const MOCK_AI_REVIEW = `## 🤖 Antigravity AI Code Review (PR #1)
 `;
 
 export default function Home() {
-  const [mockMode, setMockMode] = useState<boolean>(true);
-  const [repositories, setRepositories] = useState<Repository[]>(MOCK_REPOSITORIES);
-  const [selectedRepo, setSelectedRepo] = useState<string>("nuktitalent-backend");
+  const [mockMode, setMockMode] = useState<boolean>(false);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"overview" | "graph" | "review">("overview");
   
-  const [score, setScore] = useState<number>(85);
-  const [violations, setViolations] = useState<Violation[]>(MOCK_VIOLATIONS);
-  const [graphData, setGraphData] = useState<any>(MOCK_GRAPH);
+  const [score, setScore] = useState<number>(100);
+  const [violations, setViolations] = useState<Violation[]>([]);
+  const [graphData, setGraphData] = useState<any>({ total_files: 0, nodes: [], edges: [], circular_dependencies: [], average_instability: 0.0 });
   
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [prNumber, setPrNumber] = useState<string>("1");
   const [aiReview, setAiReview] = useState<string>("");
   const [isReviewing, setIsReviewing] = useState<boolean>(false);
   
-  const [selectedViolation, setSelectedViolation] = useState<Violation | null>(MOCK_VIOLATIONS[0]);
+  const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [selectedNode, setSelectedNode] = useState<{ file_path: string; metrics: any } | null>(null);
 
   // Load Repositories from backend if in Live Mode
