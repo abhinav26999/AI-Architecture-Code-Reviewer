@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # Repository Ingestion settings
     TEMP_CLONE_DIR: str = ""
 
+    # Database settings
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+    DIRECT_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+    # Embedding Settings
+    EMBEDDING_PROVIDER: str = "ollama"
+    OLLAMA_EMBED_URL: str = "http://localhost:11434/api/embeddings"
+    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
+
     @property
     def resolved_temp_clone_dir(self) -> str:
         """Returns the absolute path of the clone directory, resolved relative to backend root if relative."""
