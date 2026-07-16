@@ -1,0 +1,18 @@
+{
+  "layers": {
+    "controller": ["controller", "route"],
+    "service": ["service"],
+    "repository": ["repository", "model", "db"]
+  },
+  "rules": {
+    "controller": {
+      "forbidden_imports": ["repository"]
+    },
+    "repository": {
+      "forbidden_imports": ["service", "controller"]
+    },
+    "service": {
+      "forbidden_imports": ["controller"]
+    }
+  }
+}

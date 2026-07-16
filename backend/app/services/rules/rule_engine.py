@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import tree_sitter
 import tree_sitter_python
@@ -33,19 +34,80 @@ class RuleEngine:
             logger.error(f"Failed to load Tree-sitter languages in RuleEngine: {e}")
             raise
 
-    def get_layer(self, file_path: str) -> str:
-        """Classifies a file path into its logical architecture layer."""
-        path_lower = file_path.lower()
-        if "controller" in path_lower or "route" in path_lower:
-            return "controller"
-        elif "service" in path_lower:
-            return "service"
-        elif "repository" in path_lower or "model" in path_lower or "/db/" in path_lower:
-            return "repository"
+    def load_profile(self, clone_path: str) -> dict:
+        """
+        Dynamically detects framework configuration by checking files in clone_path
+        and loads corresponding JSON profiles.
+        """
+        sentinels = {
+            "pubspec.yaml": "flutter.json",
+            "package.json": "express.json",
+            "requirements.txt": "fastapi.json",
+            "pyproject.toml": "fastapi.json"
+        }
+        
+        selected_profile_name = "default.json"
+        if clone_path and os.path.exists(clone_path):
+            for file_name, profile_name in sentinels.items():
+                target_path = os.path.join(clone_path, file_name)
+                subfolders = ["", "backend", "frontend", "app"]
+                found = False
+                for sub in subfolders:
+                    check_path = os.path.join(clone_path, sub, file_name) if sub else target_path
+                    if os.path.exists(check_path):
+                        selected_profile_name = profile_name
+                        found = True
+                        break
+                if found:
+                    break
+
+        logger.info(f"RuleEngine: Detected framework configuration. Loading profile: '{selected_profile_name}'")
+
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        profile_path = os.path.abspath(os.path.join(dir_path, "..", "..", "core", "profiles", selected_profile_name))
+        
+        try:
+            with open(profile_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"RuleEngine: Failed to load profile '{selected_profile_name}': {e}. Falling back to default.")
+            return {
+                "layers": {
+                    "controller": ["controller", "route"],
+                    "service": ["service"],
+                    "repository": ["repository", "model", "db"]
+                },
+                "rules": {
+                    "controller": {
+                        "forbidden_imports": ["repository"]
+                    },
+                    "repository": {
+                        "forbidden_imports": ["service", "controller"]
+                    },
+                    "service": {
+                        "forbidden_imports": ["controller"]
+                    }
+                }
+            }
+
+    def get_layer(self, file_path: str, profile: dict) -> str:
+        """Classifies a file path into its logical architecture layer using dynamic profile patterns."""
+        path_lower = file_path.lower().replace("\\", "/")
+        parts = path_lower.split("/")
+        
+        for layer_name, matchers in profile.get("layers", {}).items():
+            for matcher in matchers:
+                for part in parts:
+                    if part == matcher.lower():
+                        return layer_name
+                    # Check dot and underscore separators (e.g. user.controller.ts)
+                    subparts = part.replace("_", ".").split(".")
+                    if matcher.lower() in subparts:
+                        return layer_name
         return "other"
 
-    def check_layer_boundaries(self, graph: DependencyGraphResponse) -> List[RuleViolation]:
-        """Validates directed imports in the graph against forbidden layering rules."""
+    def check_layer_boundaries(self, graph: DependencyGraphResponse, profile: dict) -> List[RuleViolation]:
+        """Validates directed imports in the graph against forbidden layering rules defined in the active profile."""
         logger.info("RuleEngine: Checking layer boundary imports on Dependency Graph...")
         violations: List[RuleViolation] = []
 
@@ -61,43 +123,24 @@ class RuleEngine:
             ))
 
         # Check layer violations per edge
+        rules = profile.get("rules", {})
         for edge in graph.edges:
-            src_layer = self.get_layer(edge.source)
-            tgt_layer = self.get_layer(edge.target)
-
-            # Rule 1: Controller layer must NOT directly import Repository/Model
-            if src_layer == "controller" and tgt_layer == "repository":
-                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Layer Boundary Error - Controller '{edge.source}' imports Repository/Model '{edge.target}' directly.")
+            src_layer = self.get_layer(edge.source, profile)
+            tgt_layer = self.get_layer(edge.target, profile)
+            
+            forbidden = rules.get(src_layer, {}).get("forbidden_imports", [])
+            if tgt_layer in forbidden:
+                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Layer Boundary Error - Module '{edge.source}' ({src_layer}) imports '{edge.target}' ({tgt_layer}) directly.")
                 violations.append(RuleViolation(
                     rule_name="Layer Boundary Check",
                     severity="CRITICAL",
                     file_path=edge.source,
                     line=1,
-                    message=f"Layer violation: Controller '{edge.source}' imports Repository/Model '{edge.target}' directly, bypassing Services."
+                    message=f"Layer violation: Module '{edge.source}' ({src_layer}) imports '{edge.target}' ({tgt_layer}) directly, violating architectural boundaries."
                 ))
 
-            # Rule 2: Repository/Model layer must NOT import Services or Controllers
-            elif src_layer == "repository" and tgt_layer in ("service", "controller"):
-                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Reverse Dependency Error - Repository '{edge.source}' imports '{edge.target}'.")
-                violations.append(RuleViolation(
-                    rule_name="Layer Boundary Check",
-                    severity="CRITICAL",
-                    file_path=edge.source,
-                    line=1,
-                    message=f"Reverse dependency violation: Database/Model Layer '{edge.source}' imports higher layer '{edge.target}'."
-                ))
-
-            # Rule 3: Service layer must NOT import Controllers
-            elif src_layer == "service" and tgt_layer == "controller":
-                logger.warning(f"RuleEngine: [CRITICAL VIOLATION] Reverse Dependency Error - Service '{edge.source}' imports Controller '{edge.target}'.")
-                violations.append(RuleViolation(
-                    rule_name="Layer Boundary Check",
-                    severity="CRITICAL",
-                    file_path=edge.source,
-                    line=1,
-                    message=f"Reverse dependency violation: Service '{edge.source}' imports Controller '{edge.target}'."
-                ))
-
+        if len(violations) == 0:
+            logger.info("RuleEngine: Layer boundary checks completed successfully! No violations found.")
         return violations
 
     def check_ast_rules(
@@ -192,6 +235,8 @@ class RuleEngine:
                 traverse(child, loop_depth, async_depth)
 
         traverse(tree.root_node)
+        if len(violations) == 0:
+            logger.info(f"RuleEngine: AST rule checks completed successfully for '{file_path}'. No violations found.")
         return violations
 
     def run_review(
@@ -203,11 +248,12 @@ class RuleEngine:
         clone_path: str
     ) -> ArchitectureReviewResponse:
         """Runs the rule engine review over all files and computes the final architecture score."""
+        profile = self.load_profile(clone_path)
         logger.info(f"RuleEngine: Starting architecture scan for repository '{owner}/{repo}'...")
         violations: List[RuleViolation] = []
 
         # 1. Run Graph-based boundary checks
-        violations.extend(self.check_layer_boundaries(graph))
+        violations.extend(self.check_layer_boundaries(graph, profile))
 
         # 2. Run AST-based checks on files
         for parsed in parsed_files:
@@ -243,6 +289,8 @@ class RuleEngine:
                 score -= 2
 
         score = max(0.0, score)
+        if len(violations) == 0:
+            logger.info(f"RuleEngine: Excellent code quality! Repository '{owner}/{repo}' passed all architectural rule checks successfully.")
         logger.info(f"RuleEngine: Completed review for '{owner}/{repo}'. Score: {score}/100. Total violations found: {len(violations)}")
 
         return ArchitectureReviewResponse(

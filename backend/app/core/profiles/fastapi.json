@@ -1,0 +1,18 @@
+{
+  "layers": {
+    "controller": ["routers", "api", "routes"],
+    "service": ["services", "crud"],
+    "repository": ["models", "db", "repositories"]
+  },
+  "rules": {
+    "controller": {
+      "forbidden_imports": ["repository"]
+    },
+    "repository": {
+      "forbidden_imports": ["service", "controller"]
+    },
+    "service": {
+      "forbidden_imports": ["controller"]
+    }
+  }
+}

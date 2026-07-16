@@ -1,0 +1,15 @@
+{
+  "layers": {
+    "presentation": ["presentation", "ui"],
+    "domain": ["domain", "usecases"],
+    "data": ["data", "repositories", "datasource"]
+  },
+  "rules": {
+    "domain": {
+      "forbidden_imports": ["presentation", "data"]
+    },
+    "presentation": {
+      "forbidden_imports": ["data"]
+    }
+  }
+}
