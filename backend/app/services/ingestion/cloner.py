@@ -90,13 +90,17 @@ class RepositoryCloner:
         """
         import re
 
-        # Validate and extract owner/repo from GitHub URL
-        match = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+        # Validate and extract owner/repo from GitHub, Bitbucket, or GitLab URL
+        match = re.match(r"https?://(?:www\.)?(github\.com|bitbucket\.org|gitlab\.com)/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
         if not match:
-            raise ClonerError(f"Invalid GitHub URL format: '{repo_url}'. Expected: https://github.com/owner/repo")
+            raise ClonerError(
+                f"Invalid Git URL format: '{repo_url}'. "
+                "Expected public URL from GitHub, Bitbucket, or GitLab (e.g. https://bitbucket.org/workspace/repo)"
+            )
 
-        owner = match.group(1)
-        repo = match.group(2)
+        host = match.group(1)
+        owner = match.group(2)
+        repo = match.group(3)
 
         os.makedirs(self.base_dir, exist_ok=True)
 
@@ -108,10 +112,10 @@ class RepositoryCloner:
         if not clone_path.startswith(os.path.abspath(self.base_dir)):
             raise ClonerError("Invalid clone target path generated.")
 
-        # Public clone URL (no auth token)
-        clone_url = f"https://github.com/{owner}/{repo}.git"
+        # Public clone URL
+        clone_url = f"https://{host}/{owner}/{repo}.git"
 
-        logger.info(f"Cloning public repo {owner}/{repo} (depth=1) into {clone_path}...")
+        logger.info(f"Cloning public repo {owner}/{repo} from {host} (depth=1) into {clone_path}...")
 
         cmd = ["git", "clone", "--depth", "1", clone_url, clone_path]
 

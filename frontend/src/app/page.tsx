@@ -288,7 +288,7 @@ export default function Home() {
                     value={publicRepoUrl}
                     onChange={(e) => { setPublicRepoUrl(e.target.value); setScanError(""); }}
                     onKeyDown={(e) => { if (e.key === "Enter" && !isLoading) runPublicScan(); }}
-                    placeholder="Paste public GitHub URL (e.g. https://github.com/expressjs/express)"
+                    placeholder="Paste public GitHub, Bitbucket, or GitLab URL (e.g. https://bitbucket.org/workspace/repo)"
                     className="bg-transparent text-white text-sm font-medium w-full focus:outline-none placeholder:text-zinc-600"
                   />
                 </div>
