@@ -147,8 +147,8 @@ class AIClient:
                 else:
                     logger.warning(f"Ollama returned status code {response.status_code} in scan_file_ast_rules")
         except Exception as e:
-            logger.error(f"Failed to query Ollama for file scan on '{file_path}': {e}")
-            raise e
+            logger.warning(f"Ollama AI scan skipped for '{file_path}' (AI service offline or timed out): {e}")
+            return []
 
     def _get_mock_review(self, diffs: str, violations: List[str], score: float) -> str:
         """Returns a cleanly formatted fallback review if the LLM cannot be accessed."""

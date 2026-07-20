@@ -162,7 +162,14 @@ export default function DependencyGraph({
 
     return () => {
       if (cyRef.current) {
-        cyRef.current.destroy();
+        try {
+          cyRef.current.stop();
+          cyRef.current.removeAllListeners();
+          cyRef.current.destroy();
+        } catch (e) {
+          // ignore cleanup errors on unmount
+        }
+        cyRef.current = null;
       }
     };
   }, [nodes, edges, circularDependencies, onSelectNode]);

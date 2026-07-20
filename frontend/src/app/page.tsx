@@ -175,13 +175,22 @@ export default function Home() {
 
   // Run AI PR Review (Stage 6)
   const triggerPRReview = async () => {
+    const targetRepo = scanMode === "github" ? selectedRepo : scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
+
+    if (!targetRepo) {
+      setAiReview("Please select a repository from the 'GitHub App Repos' tab or run a Quick Scan first.");
+      return;
+    }
+
     setIsReviewing(true);
     setAiReview("");
 
+    const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
+
     try {
       const payload = {
-        owner: "abhinav26999",
-        repo: selectedRepo,
+        owner: owner,
+        repo: targetRepo,
         pull_number: parseInt(prNumber) || 1,
         installation_id: null
       };
@@ -192,11 +201,16 @@ export default function Home() {
         body: JSON.stringify(payload)
       });
 
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned error ${response.status}`);
+      }
+
       const data = await response.json();
       setAiReview(data.review_body || "Failed to generate review.");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      setAiReview("Error connecting to backend API.");
+      setAiReview(`PR Review Error: ${e.message || "Error connecting to backend API."}`);
     } finally {
       setIsReviewing(false);
     }

@@ -157,7 +157,7 @@ class RuleEngine:
             logger.info(f"RuleEngine: No AST parser for language '{language}'. Delegating to AI-Driven Inspector...")
             ai_violations = await ai_client.scan_file_ast_rules(file_path, content)
             violations = []
-            for v in ai_violations:
+            for v in (ai_violations or []):
                 violations.append(RuleViolation(
                     rule_name=v.get("rule_name", "AI Rule Check"),
                     severity=v.get("severity", "MEDIUM"),
