@@ -16,7 +16,7 @@ import {
   Activity,
   Layers,
   Globe,
-  Link
+  Link as LinkIcon
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import DependencyGraph from "../components/DependencyGraph";
@@ -61,10 +61,11 @@ export default function Home() {
   const [publicRepoUrl, setPublicRepoUrl] = useState<string>("");
   const [scanError, setScanError] = useState<string>("");
   const [scannedRepoName, setScannedRepoName] = useState<string>("");
+  const [isFetchingRepos, setIsFetchingRepos] = useState<boolean>(false);
 
   // Load Repositories from backend
   useEffect(() => {
-    setIsLoading(true);
+    setIsFetchingRepos(true);
     fetch("http://localhost:8000/api/v1/github/repositories")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load live repositories");
@@ -79,7 +80,7 @@ export default function Home() {
       .catch((err) => {
         console.error(err);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => setIsFetchingRepos(false));
   }, []);
 
   // Run Codebase Analysis (Stage 1-4)
@@ -266,20 +267,22 @@ export default function Home() {
           {scanMode === "public" && (
             <div className="space-y-3">
               <div className="flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex-1 flex items-center space-x-3 bg-zinc-850 border border-zinc-700 rounded-xl px-4 py-2.5">
-                  <Link className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                <div className="flex-1 flex items-center space-x-3 bg-zinc-850 border border-zinc-700 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-500">
+                  <LinkIcon className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                   <input
                     type="text"
                     value={publicRepoUrl}
                     onChange={(e) => { setPublicRepoUrl(e.target.value); setScanError(""); }}
-                    placeholder="https://github.com/owner/repository"
+                    onKeyDown={(e) => { if (e.key === "Enter" && !isLoading) runPublicScan(); }}
+                    placeholder="Paste public GitHub URL (e.g. https://github.com/expressjs/express)"
                     className="bg-transparent text-white text-sm font-medium w-full focus:outline-none placeholder:text-zinc-600"
                   />
                 </div>
                 <button
+                  type="button"
                   onClick={runPublicScan}
                   disabled={isLoading}
-                  className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl font-bold bg-gradient-to-tr from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition duration-200"
+                  className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl font-bold bg-gradient-to-tr from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition duration-200 cursor-pointer disabled:cursor-not-allowed"
                 >
                   <Search className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
                   <span>{isLoading ? "Scanning..." : "Scan Repository"}</span>
