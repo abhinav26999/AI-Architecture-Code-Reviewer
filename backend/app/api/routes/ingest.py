@@ -4,6 +4,8 @@ from typing import List, Dict
 from fastapi import APIRouter, HTTPException, Query
 from app.services.ingestion.cloner import repo_cloner, ClonerError
 from app.services.parser.ast_parser import ast_parser
+from app.services.embeddings.rag_service import rag_service
+from app.core.database import SessionLocal
 from app.api.routes.github import get_effective_installation_id
 from app.schemas.parser import (
     ParserTestRequest,
@@ -16,7 +18,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Supported extensions
-SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+SUPPORTED_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".cpp", ".c", ".h", ".cs", ".php", ".swift", ".kt", ".dart"
+}
 
 
 @router.post("/parse-file", response_model=ParsedFile)
@@ -99,3 +104,73 @@ async def parse_repo(request: ParseRepoRequest):
         parsed_files=parsed_files,
         parsing_errors=parsing_errors
     )
+
+
+@router.post("/ingest-repo")
+async def ingest_repo(request: ParseRepoRequest):
+    """
+    Clones, AST-parses, chunks, generates embeddings via Ollama,
+    and commits all code snippets to Supabase pgvector.
+    """
+    try:
+        inst_id = await get_effective_installation_id(request.installation_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not resolve active installation ID: {str(e)}"
+        )
+
+    # 1. Clone repository
+    try:
+        clone_path = await repo_cloner.clone_repository(
+            owner=request.owner,
+            repo=request.repo,
+            installation_id=inst_id
+        )
+    except ClonerError as e:
+        raise HTTPException(status_code=500, detail=f"Repository ingestion failed: {str(e)}")
+
+    parsed_files: List[ParsedFile] = []
+    ignored_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
+
+    # 2. Walk and parse files
+    try:
+        for root, dirs, files in os.walk(clone_path):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+            
+            for file in files:
+                ext = os.path.splitext(file)[1]
+                if ext.lower() in SUPPORTED_EXTENSIONS:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, clone_path)
+                    
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        
+                        parsed = ast_parser.parse_code(content, rel_path)
+                        parsed_files.append(parsed)
+                    except Exception as e:
+                        logger.error(f"Error parsing file {rel_path} for ingestion: {e}")
+                        continue
+                        
+        # 3. Bulk ingest into pgvector database
+        try:
+            async with SessionLocal() as db_session:
+                await rag_service.ingest_codebase(
+                    db=db_session,
+                    parsed_files=parsed_files,
+                    clone_path=clone_path
+                )
+        except Exception as e:
+            logger.error(f"Failed to save embeddings in DB: {e}")
+            raise HTTPException(status_code=500, detail=f"Database storage failed: {str(e)}")
+            
+    finally:
+        # 4. Cleanup cloned repository folder (Guaranteed execution)
+        repo_cloner.cleanup_clone(clone_path)
+
+    return {
+        "status": "success",
+        "message": f"Successfully parsed and ingested {len(parsed_files)} codebase files into Supabase!"
+    }

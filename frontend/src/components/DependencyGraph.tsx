@@ -35,9 +35,25 @@ export default function DependencyGraph({
 }: DependencyGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
+  const layoutRef = useRef<any>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Clean up previous instance before creating a new one
+    if (cyRef.current) {
+      try {
+        if (layoutRef.current) layoutRef.current.stop();
+        cyRef.current.stop();
+        cyRef.current.removeAllListeners();
+        cyRef.current.destroy();
+      } catch (e) {}
+      cyRef.current = null;
+    }
+
+    if (containerRef.current) {
+      containerRef.current.innerHTML = "";
+    }
 
     // Flatten circular dependencies for fast lookup
     const cyclicFiles = new Set<string>();
@@ -68,62 +84,69 @@ export default function DependencyGraph({
       },
     }));
 
-    // Initialize Cytoscape
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [...cyNodes, ...cyEdges],
-      style: [
-        {
-          selector: "node",
-          style: {
-            content: "data(label)",
-            "font-size": "11px",
-            "font-family": "system-ui, sans-serif",
-            color: "#ffffff",
-            "text-valign": "bottom",
-            "text-margin-y": 6,
-            "background-color": "#4f46e5", // Indigo base
-            width: "32px",
-            height: "32px",
-            "border-width": "2px",
-            "border-color": "#1e1b4b",
-            "overlay-padding": "6px",
-            "transition-property": "background-color, border-color, width, height",
-            "transition-duration": 0.2,
+    try {
+      // Initialize Cytoscape without auto-running async layout
+      const cy = cytoscape({
+        container: containerRef.current,
+        elements: [...cyNodes, ...cyEdges],
+        style: [
+          {
+            selector: "node",
+            style: {
+              content: "data(label)",
+              "font-size": "11px",
+              "font-family": "system-ui, sans-serif",
+              color: "#ffffff",
+              "text-valign": "bottom",
+              "text-margin-y": 6,
+              "background-color": "#4f46e5", // Indigo base
+              width: "32px",
+              height: "32px",
+              "border-width": "2px",
+              "border-color": "#1e1b4b",
+              "overlay-padding": "6px",
+              "transition-property": "background-color, border-color, width, height",
+              "transition-duration": 0.2,
+            },
           },
-        },
-        {
-          selector: "node[isCyclic]",
-          style: {
-            "background-color": "#f97316", // Orange/red for circular dependency
-            "border-color": "#ea580c",
-            "border-width": "3px",
+          {
+            selector: "node[isCyclic]",
+            style: {
+              "background-color": "#f97316", // Orange/red for circular dependency
+              "border-color": "#ea580c",
+              "border-width": "3px",
+            },
           },
-        },
-        {
-          selector: "node:selected",
-          style: {
-            "background-color": "#10b981", // Emerald for selection
-            "border-color": "#047857",
-            "border-width": "3px",
-            width: "38px",
-            height: "38px",
+          {
+            selector: "node:selected",
+            style: {
+              "background-color": "#10b981", // Emerald for selection
+              "border-color": "#047857",
+              "border-width": "3px",
+              width: "38px",
+              height: "38px",
+            },
           },
-        },
-        {
-          selector: "edge",
-          style: {
-            width: 2,
-            "line-color": "#475569", // Slate edge
-            "target-arrow-color": "#475569",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier",
-            opacity: 0.8,
+          {
+            selector: "edge",
+            style: {
+              width: 2,
+              "line-color": "#475569", // Slate edge
+              "target-arrow-color": "#475569",
+              "target-arrow-shape": "triangle",
+              "curve-style": "bezier",
+              opacity: 0.8,
+            },
           },
-        },
-      ],
-      layout: {
-        name: "cose", // Force-directed layout
+        ],
+      });
+
+      cyRef.current = cy;
+
+      // Run layout explicitly and store reference
+      const layout = cy.layout({
+        name: "cose",
+        animate: false,
         idealEdgeLength: () => 100,
         nodeOverlap: 20,
         refresh: 20,
@@ -135,34 +158,43 @@ export default function DependencyGraph({
         edgeElasticity: () => 100,
         nestingFactor: 5,
         gravity: 80,
-        numIter: 1000,
-        initialTemp: 200,
-        coolingFactor: 0.95,
-        minTemp: 1.0,
-      } as any,
-    });
+        numIter: 500,
+      } as any);
 
-    cyRef.current = cy;
+      layoutRef.current = layout;
+      layout.run();
 
-    // Node click handlers
-    cy.on("tap", "node", (evt) => {
-      const node = evt.target;
-      onSelectNode({
-        file_path: node.data("fullPath"),
-        metrics: node.data("metrics"),
+      // Node click handlers
+      cy.on("tap", "node", (evt) => {
+        const node = evt.target;
+        onSelectNode({
+          file_path: node.data("fullPath"),
+          metrics: node.data("metrics"),
+        });
       });
-    });
 
-    // Canvas click clears selection
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) {
-        onSelectNode(null);
-      }
-    });
+      // Canvas click clears selection
+      cy.on("tap", (evt) => {
+        if (evt.target === cy) {
+          onSelectNode(null);
+        }
+      });
+    } catch (e) {
+      console.warn("Cytoscape init error:", e);
+    }
 
     return () => {
+      if (layoutRef.current) {
+        try { layoutRef.current.stop(); } catch (e) {}
+        layoutRef.current = null;
+      }
       if (cyRef.current) {
-        cyRef.current.destroy();
+        try {
+          cyRef.current.stop();
+          cyRef.current.removeAllListeners();
+          cyRef.current.destroy();
+        } catch (e) {}
+        cyRef.current = null;
       }
     };
   }, [nodes, edges, circularDependencies, onSelectNode]);

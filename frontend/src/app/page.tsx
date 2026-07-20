@@ -14,7 +14,9 @@ import {
   ArrowRight,
   Sparkles,
   Activity,
-  Layers
+  Layers,
+  Globe,
+  Link as LinkIcon
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import DependencyGraph from "../components/DependencyGraph";
@@ -54,9 +56,16 @@ export default function Home() {
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [selectedNode, setSelectedNode] = useState<{ file_path: string; metrics: any } | null>(null);
 
+  // Public Scan State
+  const [scanMode, setScanMode] = useState<"public" | "github">("public");
+  const [publicRepoUrl, setPublicRepoUrl] = useState<string>("");
+  const [scanError, setScanError] = useState<string>("");
+  const [scannedRepoName, setScannedRepoName] = useState<string>("");
+  const [isFetchingRepos, setIsFetchingRepos] = useState<boolean>(false);
+
   // Load Repositories from backend
   useEffect(() => {
-    setIsLoading(true);
+    setIsFetchingRepos(true);
     fetch("http://localhost:8000/api/v1/github/repositories")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load live repositories");
@@ -71,7 +80,7 @@ export default function Home() {
       .catch((err) => {
         console.error(err);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => setIsFetchingRepos(false));
   }, []);
 
   // Run Codebase Analysis (Stage 1-4)
@@ -84,20 +93,20 @@ export default function Home() {
         installation_id: null
       };
 
-      // 1. Analyze rules
-      const reviewRes = await fetch("http://localhost:8000/api/v1/review/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const reviewData = await reviewRes.json();
+      const [reviewRes, graphRes] = await Promise.all([
+        fetch("http://localhost:8000/api/v1/review/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }),
+        fetch("http://localhost:8000/api/v1/graph/analyze-repo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      ]);
 
-      // 2. Analyze graph
-      const graphRes = await fetch("http://localhost:8000/api/v1/graph/analyze-repo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      const reviewData = await reviewRes.json();
       const graphDataJson = await graphRes.json();
 
       setScore(reviewData.score || 100);
@@ -115,15 +124,73 @@ export default function Home() {
     }
   };
 
+  // Run Public Repo Scan
+  const runPublicScan = async () => {
+    if (!publicRepoUrl.trim()) {
+      setScanError("Please paste a GitHub repository URL.");
+      return;
+    }
+    setScanError("");
+    setIsLoading(true);
+    setScannedRepoName("");
+    try {
+      const payload = { repo_url: publicRepoUrl.trim() };
+
+      const [reviewRes, graphRes] = await Promise.all([
+        fetch("http://localhost:8000/api/v1/review/scan-public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }),
+        fetch("http://localhost:8000/api/v1/graph/scan-public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      ]);
+
+      if (!reviewRes.ok) {
+        const errData = await reviewRes.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to scan repository.");
+      }
+
+      const reviewData = await reviewRes.json();
+      const graphDataJson = await graphRes.json();
+
+      setScore(reviewData.score || 100);
+      setViolations(reviewData.violations || []);
+      setGraphData(graphDataJson);
+      setScannedRepoName(`${reviewData.owner}/${reviewData.repo}`);
+
+      if (reviewData.score === 100) {
+        confetti({ particleCount: 150, spread: 80, colors: ["#10b981", "#3b82f6"] });
+      }
+    } catch (e: any) {
+      console.error(e);
+      setScanError(e.message || "Failed to scan the repository. Make sure it is a valid public GitHub URL.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Run AI PR Review (Stage 6)
   const triggerPRReview = async () => {
+    const targetRepo = scanMode === "github" ? selectedRepo : scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
+
+    if (!targetRepo) {
+      setAiReview("Please select a repository from the 'GitHub App Repos' tab or run a Quick Scan first.");
+      return;
+    }
+
     setIsReviewing(true);
     setAiReview("");
 
+    const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
+
     try {
       const payload = {
-        owner: "abhinav26999",
-        repo: selectedRepo,
+        owner: owner,
+        repo: targetRepo,
         pull_number: parseInt(prNumber) || 1,
         installation_id: null
       };
@@ -134,11 +201,16 @@ export default function Home() {
         body: JSON.stringify(payload)
       });
 
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned error ${response.status}`);
+      }
+
       const data = await response.json();
       setAiReview(data.review_body || "Failed to generate review.");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      setAiReview("Error connecting to backend API.");
+      setAiReview(`PR Review Error: ${e.message || "Error connecting to backend API."}`);
     } finally {
       setIsReviewing(false);
     }
@@ -177,31 +249,104 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-6 mt-8">
         
         {/* REPOSITORY ACTIONS & TRIGGER */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl border border-zinc-800 bg-zinc-900/30 backdrop-blur-md">
-          <div className="flex items-center space-x-3">
-            <Layers className="w-5 h-5 text-zinc-400" />
-            <div className="text-sm font-semibold text-zinc-400">Select Active Repository:</div>
-            <select
-              value={selectedRepo}
-              onChange={(e) => setSelectedRepo(e.target.value)}
-              className="bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        <div className="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/30 backdrop-blur-md space-y-5">
+          
+          {/* Mode Toggle */}
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setScanMode("public")}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition duration-200 ${
+                scanMode === "public"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                  : "bg-zinc-800 text-zinc-400 hover:text-white"
+              }`}
             >
-              {repositories.map((repo) => (
-                <option key={repo.name} value={repo.name}>
-                  {repo.full_name || repo.name}
-                </option>
-              ))}
-            </select>
+              <Globe className="w-4 h-4" />
+              <span>Quick Scan (Public URL)</span>
+            </button>
+            <button
+              onClick={() => setScanMode("github")}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition duration-200 ${
+                scanMode === "github"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                  : "bg-zinc-800 text-zinc-400 hover:text-white"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>GitHub App Repos</span>
+            </button>
           </div>
 
-          <button
-            onClick={runAnalysis}
-            disabled={isLoading}
-            className="flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/10 disabled:opacity-50 transition duration-200"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-            <span>{isLoading ? "Running Architecture Scan..." : "Trigger Codebase Scan"}</span>
-          </button>
+          {/* Public URL Scan */}
+          {scanMode === "public" && (
+            <div className="space-y-3">
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex-1 flex items-center space-x-3 bg-zinc-850 border border-zinc-700 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-500">
+                  <LinkIcon className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={publicRepoUrl}
+                    onChange={(e) => { setPublicRepoUrl(e.target.value); setScanError(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !isLoading) runPublicScan(); }}
+                    placeholder="Paste public GitHub, Bitbucket, or GitLab URL (e.g. https://bitbucket.org/workspace/repo)"
+                    className="bg-transparent text-white text-sm font-medium w-full focus:outline-none placeholder:text-zinc-600"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={runPublicScan}
+                  disabled={isLoading}
+                  className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl font-bold bg-gradient-to-tr from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition duration-200 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <Search className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+                  <span>{isLoading ? "Scanning..." : "Scan Repository"}</span>
+                </button>
+              </div>
+              {scanError && (
+                <div className="flex items-center space-x-2 text-red-400 text-xs font-semibold px-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>{scanError}</span>
+                </div>
+              )}
+              {scannedRepoName && !isLoading && (
+                <div className="flex items-center space-x-2 text-emerald-400 text-xs font-semibold px-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Scan complete for {scannedRepoName}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* GitHub App Repos */}
+          {scanMode === "github" && (
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center space-x-3">
+                <Layers className="w-5 h-5 text-zinc-400" />
+                <div className="text-sm font-semibold text-zinc-400">Select Active Repository:</div>
+                <select
+                  value={selectedRepo}
+                  onChange={(e) => setSelectedRepo(e.target.value)}
+                  className="bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {repositories.map((repo) => (
+                    <option key={repo.name} value={repo.name}>
+                      {repo.full_name || repo.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={runAnalysis}
+                disabled={isLoading}
+                className="flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/10 disabled:opacity-50 transition duration-200"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+                <span>{isLoading ? "Running Architecture Scan..." : "Trigger Codebase Scan"}</span>
+              </button>
+            </div>
+          )}
+
         </div>
 
         {/* TABS */}
