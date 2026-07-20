@@ -83,6 +83,62 @@ class RepositoryCloner:
                 raise ClonerError(f"Unexpected cloner error: {str(e)}")
             raise
 
+    async def clone_public_repository(self, repo_url: str) -> tuple:
+        """
+        Shallow clones a public GitHub repository using its URL (no authentication).
+        Returns a tuple of (clone_path, owner, repo).
+        """
+        import re
+
+        # Validate and extract owner/repo from GitHub URL
+        match = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+        if not match:
+            raise ClonerError(f"Invalid GitHub URL format: '{repo_url}'. Expected: https://github.com/owner/repo")
+
+        owner = match.group(1)
+        repo = match.group(2)
+
+        os.makedirs(self.base_dir, exist_ok=True)
+
+        unique_id = uuid.uuid4().hex[:10]
+        clone_dirname = f"{owner}_{repo}_{unique_id}"
+        clone_path = os.path.join(self.base_dir, clone_dirname)
+        clone_path = os.path.abspath(clone_path)
+
+        if not clone_path.startswith(os.path.abspath(self.base_dir)):
+            raise ClonerError("Invalid clone target path generated.")
+
+        # Public clone URL (no auth token)
+        clone_url = f"https://github.com/{owner}/{repo}.git"
+
+        logger.info(f"Cloning public repo {owner}/{repo} (depth=1) into {clone_path}...")
+
+        cmd = ["git", "clone", "--depth", "1", clone_url, clone_path]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                err_msg = stderr.decode().strip()
+                logger.error(f"Public git clone failed: {err_msg}")
+                self.cleanup_clone(clone_path)
+                raise ClonerError(f"Git clone failed. The repository may be private or does not exist: {err_msg}")
+
+            logger.info(f"Successfully cloned public repo {owner}/{repo} to {clone_path}")
+            return clone_path, owner, repo
+
+        except Exception as e:
+            if not isinstance(e, ClonerError):
+                logger.exception("Unexpected error during public git clone")
+                self.cleanup_clone(clone_path)
+                raise ClonerError(f"Unexpected cloner error: {str(e)}")
+            raise
+
     def cleanup_clone(self, clone_path: str):
         """Recursively removes the cloned folder if it is within the temp directory."""
         clone_path = os.path.abspath(clone_path)

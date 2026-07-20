@@ -2,6 +2,7 @@ import os
 import logging
 from typing import List, Dict
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from app.services.ingestion.cloner import repo_cloner, ClonerError
 from app.services.parser.ast_parser import ast_parser
 from app.services.dependency_graph.graph_builder import graph_builder
@@ -78,3 +79,57 @@ async def analyze_repo(request: ParseRepoRequest):
     finally:
         # 4. Clean up cloned codebase folder from disk (Guaranteed execution)
         repo_cloner.cleanup_clone(clone_path)
+
+
+class PublicScanRequest(BaseModel):
+    repo_url: str
+
+
+@router.post("/scan-public", response_model=DependencyGraphResponse)
+async def scan_public_graph(request: PublicScanRequest):
+    """
+    Analyzes the dependency graph of any public GitHub repository by URL.
+    No authentication required.
+    """
+    # 1. Clone public repository
+    try:
+        clone_path, owner, repo = await repo_cloner.clone_public_repository(request.repo_url)
+    except ClonerError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    parsed_files = []
+    ignored_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
+
+    # 2. Parse codebase files
+    try:
+        for root, dirs, files in os.walk(clone_path):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+
+            for file in files:
+                ext = os.path.splitext(file)[1]
+                if ext.lower() in SUPPORTED_EXTENSIONS:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, clone_path)
+
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+
+                        parsed = ast_parser.parse_code(content, rel_path)
+                        parsed_files.append(parsed)
+                    except Exception as e:
+                        logger.error(f"Error parsing file {rel_path} in public graph scan: {e}")
+                        continue
+
+        # 3. Build the dependency graph
+        response = graph_builder.build_graph(
+            owner=owner,
+            repo=repo,
+            parsed_files=parsed_files
+        )
+        return response
+
+    finally:
+        # 4. Clean up cloned codebase folder
+        repo_cloner.cleanup_clone(clone_path)
+

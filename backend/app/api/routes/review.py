@@ -25,8 +25,16 @@ class PRReviewRequest(BaseModel):
     pull_number: int
     installation_id: Optional[int] = None
 
+
+class PublicScanRequest(BaseModel):
+    repo_url: str
+
+
 # Supported extensions
-SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+SUPPORTED_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".cpp", ".c", ".h", ".cs", ".php", ".swift", ".kt", ".dart"
+}
 
 
 @router.post("/analyze", response_model=ArchitectureReviewResponse)
@@ -245,3 +253,63 @@ async def analyze_and_review_pr(request: PRReviewRequest):
     finally:
         # 9. Clean up cloned codebase folder (Guaranteed execution)
         repo_cloner.cleanup_clone(clone_path)
+
+
+@router.post("/scan-public", response_model=ArchitectureReviewResponse)
+async def scan_public_repository(request: PublicScanRequest):
+    """
+    Scans any public GitHub repository by URL. No authentication required.
+    Clones the repo, parses files, builds graph, runs Rule Engine, and returns the review.
+    """
+    # 1. Clone public repository
+    try:
+        clone_path, owner, repo = await repo_cloner.clone_public_repository(request.repo_url)
+    except ClonerError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    parsed_files = []
+    ignored_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
+
+    # 2. Extract AST Metadata
+    try:
+        for root, dirs, files in os.walk(clone_path):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+
+            for file in files:
+                ext = os.path.splitext(file)[1]
+                if ext.lower() in SUPPORTED_EXTENSIONS:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, clone_path)
+
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+
+                        parsed = ast_parser.parse_code(content, rel_path)
+                        parsed_files.append(parsed)
+                    except Exception as e:
+                        logger.error(f"Error parsing file {rel_path} in public scan: {e}")
+                        continue
+
+        # 3. Build Graph
+        graph = graph_builder.build_graph(
+            owner=owner,
+            repo=repo,
+            parsed_files=parsed_files
+        )
+
+        # 4. Run Rule Engine Checks
+        review_results = await rule_engine.run_review(
+            owner=owner,
+            repo=repo,
+            parsed_files=parsed_files,
+            graph=graph,
+            clone_path=clone_path
+        )
+
+        return review_results
+
+    finally:
+        # 5. Clean up cloned codebase folder
+        repo_cloner.cleanup_clone(clone_path)
+
