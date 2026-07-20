@@ -93,20 +93,20 @@ export default function Home() {
         installation_id: null
       };
 
-      // 1. Analyze rules
-      const reviewRes = await fetch("http://localhost:8000/api/v1/review/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const reviewData = await reviewRes.json();
+      const [reviewRes, graphRes] = await Promise.all([
+        fetch("http://localhost:8000/api/v1/review/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }),
+        fetch("http://localhost:8000/api/v1/graph/analyze-repo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      ]);
 
-      // 2. Analyze graph
-      const graphRes = await fetch("http://localhost:8000/api/v1/graph/analyze-repo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      const reviewData = await reviewRes.json();
       const graphDataJson = await graphRes.json();
 
       setScore(reviewData.score || 100);
@@ -136,25 +136,25 @@ export default function Home() {
     try {
       const payload = { repo_url: publicRepoUrl.trim() };
 
-      // 1. Analyze rules
-      const reviewRes = await fetch("http://localhost:8000/api/v1/review/scan-public", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      const [reviewRes, graphRes] = await Promise.all([
+        fetch("http://localhost:8000/api/v1/review/scan-public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }),
+        fetch("http://localhost:8000/api/v1/graph/scan-public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      ]);
 
       if (!reviewRes.ok) {
-        const errData = await reviewRes.json();
+        const errData = await reviewRes.json().catch(() => ({}));
         throw new Error(errData.detail || "Failed to scan repository.");
       }
-      const reviewData = await reviewRes.json();
 
-      // 2. Analyze graph
-      const graphRes = await fetch("http://localhost:8000/api/v1/graph/scan-public", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      const reviewData = await reviewRes.json();
       const graphDataJson = await graphRes.json();
 
       setScore(reviewData.score || 100);

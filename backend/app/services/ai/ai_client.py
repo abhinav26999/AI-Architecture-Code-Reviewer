@@ -135,7 +135,7 @@ class AIClient:
                 response = await client.post(
                     settings.OLLAMA_GEN_URL,
                     json=payload,
-                    timeout=30.0
+                    timeout=5.0
                 )
                 if response.status_code == 200:
                     data = response.json()
