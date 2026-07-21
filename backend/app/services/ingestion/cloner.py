@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 class ClonerError(Exception):
     """Exception raised for cloner failures."""
     pass
-
-
+ 
 class RepositoryCloner:
     def __init__(self):
         self.base_dir = settings.resolved_temp_clone_dir
@@ -111,17 +110,18 @@ class RepositoryCloner:
         """
         import re
 
-        # Validate and extract owner/repo from GitHub, Bitbucket, or GitLab URL
-        match = re.match(r"https?://(?:www\.)?(github\.com|bitbucket\.org|gitlab\.com)/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+        # Validate and extract owner/repo from GitHub, Bitbucket, or GitLab URL (supporting optional user@ prefix)
+        match = re.match(r"https?://(?:([^/@]+)@)?(?:www\.)?(github\.com|bitbucket\.org|gitlab\.com)/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
         if not match:
             raise ClonerError(
                 f"Invalid Git URL format: '{repo_url}'. "
                 "Expected URL from GitHub, Bitbucket, or GitLab (e.g. https://bitbucket.org/workspace/repo)"
             )
 
-        host = match.group(1).lower()
-        owner = match.group(2)
-        repo = match.group(3)
+        url_user = match.group(1)
+        host = match.group(2).lower()
+        owner = match.group(3)
+        repo = match.group(4)
 
         os.makedirs(self.base_dir, exist_ok=True)
 
@@ -133,38 +133,78 @@ class RepositoryCloner:
         if not clone_path.startswith(os.path.abspath(self.base_dir)):
             raise ClonerError("Invalid clone target path generated.")
 
-        # Construct authenticated clone URL depending on host & available token
+        # Construct candidate authentication clone URLs depending on host & available token
+        candidate_urls = []
         active_token = None
+
+        import urllib.parse
+
         if host == "github.com" and github_token and github_token.strip():
             active_token = github_token.strip()
-            clone_url = f"https://x-access-token:{active_token}@github.com/{owner}/{repo}.git"
+            safe_tok = urllib.parse.quote(active_token, safe="")
+            candidate_urls.append(f"https://x-access-token:{safe_tok}@github.com/{owner}/{repo}.git")
         elif host == "gitlab.com" and gitlab_token and gitlab_token.strip():
             active_token = gitlab_token.strip()
-            clone_url = f"https://oauth2:{active_token}@gitlab.com/{owner}/{repo}.git"
+            safe_tok = urllib.parse.quote(active_token, safe="")
+            candidate_urls.append(f"https://oauth2:{safe_tok}@gitlab.com/{owner}/{repo}.git")
+            candidate_urls.append(f"https://gitlab-ci-token:{safe_tok}@gitlab.com/{owner}/{repo}.git")
         elif host == "bitbucket.org" and bitbucket_token and bitbucket_token.strip():
             active_token = bitbucket_token.strip()
-            clone_url = f"https://x-token-auth:{active_token}@bitbucket.org/{owner}/{repo}.git"
+            if ":" in active_token:
+                u, p = active_token.split(":", 1)
+                su = urllib.parse.quote(u.strip(), safe="")
+                sp = urllib.parse.quote(p.strip(), safe="")
+                candidate_urls.append(f"https://{su}:{sp}@bitbucket.org/{owner}/{repo}.git")
+            else:
+                sp = urllib.parse.quote(active_token, safe="")
+                candidate_urls.append(f"https://x-token-auth:{sp}@bitbucket.org/{owner}/{repo}.git")
+                if url_user:
+                    su = urllib.parse.quote(url_user, safe="")
+                    candidate_urls.append(f"https://{su}:{sp}@bitbucket.org/{owner}/{repo}.git")
+                so = urllib.parse.quote(owner, safe="")
+                candidate_urls.append(f"https://{so}:{sp}@bitbucket.org/{owner}/{repo}.git")
         else:
-            clone_url = f"https://{host}/{owner}/{repo}.git"
+            if url_user and active_token:
+                su = urllib.parse.quote(url_user, safe="")
+                sp = urllib.parse.quote(active_token, safe="")
+                candidate_urls.append(f"https://{su}:{sp}@{host}/{owner}/{repo}.git")
+            candidate_urls.append(f"https://{host}/{owner}/{repo}.git")
 
         logger.info(f"Cloning repo {owner}/{repo} from {host} (depth=1) into {clone_path}...")
 
-        cmd = ["git", "clone", "--depth", "1", clone_url, clone_path]
+        last_err_msg = ""
+        clone_success = False
+
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+            for clone_url in candidate_urls:
+                cmd = ["git", "clone", "--depth", "1", clone_url, clone_path]
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env
+                    )
+                    stdout, stderr = await process.communicate()
 
-            if process.returncode != 0:
-                err_msg = stderr.decode().strip()
+                    if process.returncode == 0:
+                        clone_success = True
+                        break
+                    else:
+                        last_err_msg = stderr.decode().strip()
+                        self.cleanup_clone(clone_path)
+                except Exception as ex:
+                    last_err_msg = str(ex)
+                    self.cleanup_clone(clone_path)
+
+            if not clone_success:
+                err_msg = last_err_msg
                 if active_token:
                     err_msg = err_msg.replace(active_token, "******")
                 logger.error(f"Git clone failed for {host}/{owner}/{repo}: {err_msg}")
-                self.cleanup_clone(clone_path)
                 
                 # Check for private repository authentication requirement
                 is_private_auth = any(term in err_msg.lower() for term in [

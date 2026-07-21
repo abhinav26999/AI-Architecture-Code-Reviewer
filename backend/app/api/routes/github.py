@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from app.services.github.github_client import github_client, GitHubAPIError
 from app.schemas.github import (
     GitHubAppTestResponse,
@@ -89,28 +89,93 @@ async def list_repositories(installation_id: Optional[int] = Query(None, descrip
 
 @router.get("/public-pulls")
 async def list_public_pull_requests(
+    raw_request: Request,
     repo_url: str = Query(..., description="Repository URL (e.g. https://github.com/owner/repo)")
 ):
-    """Fetches list of pull requests for any GitHub URL."""
+    """Fetches list of pull requests / merge requests for GitHub, Bitbucket, or GitLab URLs."""
     import re
     import httpx
+    import urllib.parse
 
-    match = re.match(r"https?://(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+    clean_url = repo_url.strip()
+    match = re.match(r"https?://(?:[^/@]+@)?(?:www\.)?(github\.com|bitbucket\.org|gitlab\.com)/([^/]+)/([^/]+?)(?:\.git|/.*)?$", clean_url)
     if not match:
         return []
 
-    owner, repo = match.group(1), match.group(2)
-    api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=30"
+    host = match.group(1).lower()
+    owner = match.group(2)
+    repo = match.group(3)
 
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "AI-Architecture-Code-Reviewer"}
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.get(api_url, headers=headers, timeout=5.0)
-            if res.status_code == 200:
-                return res.json()
+    gh_token = raw_request.headers.get("x-github-token")
+    bb_token = raw_request.headers.get("x-bitbucket-token")
+    gl_token = raw_request.headers.get("x-gitlab-token")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            if host == "github.com":
+                api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=30"
+                headers = {"Accept": "application/vnd.github+json", "User-Agent": "AI-Architecture-Code-Reviewer"}
+                if gh_token and gh_token.strip():
+                    headers["Authorization"] = f"Bearer {gh_token.strip()}"
+                
+                res = await client.get(api_url, headers=headers, timeout=6.0)
+                if res.status_code == 200:
+                    return res.json()
+
+            elif host == "bitbucket.org":
+                api_url = f"https://api.bitbucket.org/2.0/repositories/{owner}/{repo}/pullrequests?pagelen=30"
+                headers = {"User-Agent": "AI-Architecture-Code-Reviewer"}
+                if bb_token and bb_token.strip():
+                    if ":" in bb_token:
+                        u, p = bb_token.strip().split(":", 1)
+                        headers["Authorization"] = httpx.BasicAuth(u.strip(), p.strip())._auth_header
+                    else:
+                        headers["Authorization"] = f"Bearer {bb_token.strip()}"
+
+                res = await client.get(api_url, headers=headers, timeout=6.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    formatted_prs = []
+                    for item in data.get("values", []):
+                        formatted_prs.append({
+                            "id": item.get("id"),
+                            "number": item.get("id"),
+                            "title": item.get("title", ""),
+                            "state": item.get("state", "open").lower(),
+                            "user": {"login": item.get("author", {}).get("display_name", "Author")},
+                            "head": {"ref": item.get("source", {}).get("branch", {}).get("name", "")},
+                            "base": {"ref": item.get("destination", {}).get("branch", {}).get("name", "")}
+                        })
+                    return formatted_prs
+
+            elif host == "gitlab.com":
+                project_path = urllib.parse.quote(f"{owner}/{repo}", safe="")
+                api_url = f"https://gitlab.com/api/v4/projects/{project_path}/merge_requests?per_page=30"
+                headers = {"User-Agent": "AI-Architecture-Code-Reviewer"}
+                if gl_token and gl_token.strip():
+                    headers["PRIVATE-TOKEN"] = gl_token.strip()
+
+                res = await client.get(api_url, headers=headers, timeout=6.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    formatted_prs = []
+                    for item in data:
+                        formatted_prs.append({
+                            "id": item.get("id"),
+                            "number": item.get("iid"),
+                            "title": item.get("title", ""),
+                            "state": item.get("state", "opened"),
+                            "user": {"login": item.get("author", {}).get("username", "Author")},
+                            "head": {"ref": item.get("source_branch", "")},
+                            "base": {"ref": item.get("target_branch", "")}
+                        })
+                    return formatted_prs
+
+        except Exception as e:
+            logger.error(f"Error fetching public pull requests for {repo_url}: {e}")
             return []
-    except Exception:
-        return []
+
+    return []
 
 
 @router.get("/repos/{owner}/{repo}/pulls")

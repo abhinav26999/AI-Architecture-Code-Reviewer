@@ -55,7 +55,7 @@ interface PRReviewResponse {
 export default function Home() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"violations" | "graph" | "review">("violations");
+  const [activeTab, setActiveTab] = useState<"violations" | "review">("violations");
   
   const [score, setScore] = useState<number>(100);
   const [violations, setViolations] = useState<Violation[]>([]);
@@ -498,13 +498,6 @@ export default function Home() {
             <span>Architecture Violations</span>
           </button>
           <button 
-            onClick={() => setActiveTab("graph")}
-            className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "graph" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span>Dependency Graph</span>
-          </button>
-          <button 
             onClick={() => setActiveTab("review")}
             className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "review" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
           >
@@ -658,32 +651,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* TAB 2: DEPENDENCY GRAPH */}
-          {activeTab === "graph" && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-slate-900 text-base">Interactive Codebase Dependency Graph</h3>
-                  <p className="text-xs text-slate-500 mt-1">Directed graph visualization of module couplings, instability indexes, and circular dependencies.</p>
-                </div>
-                <div className="flex items-center space-x-2 text-xs font-bold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                  <Activity className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>{graphData.total_files} Code Files Analyzed</span>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 rounded-xl bg-slate-50 overflow-hidden h-[500px]">
-                <DependencyGraph 
-                  nodes={graphData.nodes} 
-                  edges={graphData.edges} 
-                  circularDependencies={graphData.circular_dependencies || []}
-                  onSelectNode={(node) => setSelectedNode(node)} 
-                />
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: AUTOMATED AI PR REVIEWS */}
+          {/* TAB 2: AUTOMATED AI PR REVIEWS */}
           {activeTab === "review" && (
             <div className="max-w-3xl mx-auto space-y-6">
               
@@ -709,14 +677,14 @@ export default function Home() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
                   
-                  {/* PR Selector Dropdown or Manual Input */}
+                  {/* PR Selector Dropdown or No PRs Found state */}
                   <div className="md:col-span-2">
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs font-semibold text-slate-700">
-                        {openPRs.length > 0 ? `Select Pull Request (${openPRs.length} found)` : "Enter PR Number"}
+                        {openPRs.length > 0 ? `Select Pull Request (${openPRs.length} available)` : "Pull Request Selection"}
                       </label>
                       {isLoadingPRs && (
-                        <span className="text-[10px] text-slate-400 animate-pulse font-semibold">Loading PRs...</span>
+                        <span className="text-[10px] text-slate-400 animate-pulse font-semibold">Fetching PRs...</span>
                       )}
                     </div>
 
@@ -738,15 +706,23 @@ export default function Home() {
                         })}
                       </select>
                     ) : (
-                      <div className="flex items-center space-x-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
-                        <span className="text-xs text-slate-500 font-semibold">PR #:</span>
-                        <input
-                          type="number"
-                          value={prNumber}
-                          onChange={(e) => setPrNumber(e.target.value)}
-                          placeholder="1"
-                          className="bg-transparent text-slate-900 font-bold text-sm w-full focus:outline-none"
-                        />
+                      <div className="space-y-2">
+                        <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-800">
+                          <span className="font-semibold flex items-center gap-1.5">
+                            ⚠️ No Pull Requests found in this repository.
+                          </span>
+                        </div>
+
+                        <div className="flex items-center space-x-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
+                          <span className="text-xs text-slate-400 font-semibold whitespace-nowrap">Enter PR # manually:</span>
+                          <input
+                            type="number"
+                            value={prNumber}
+                            onChange={(e) => setPrNumber(e.target.value)}
+                            placeholder="1"
+                            className="bg-transparent text-slate-900 font-bold text-sm w-full focus:outline-none"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
