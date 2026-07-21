@@ -34,6 +34,7 @@ interface Violation {
 }
 
 interface Repository {
+  id?: number;
   name: string;
   full_name: string;
   owner: { login: string };
@@ -105,9 +106,22 @@ export default function Home() {
     if (scanMode === "public" && publicRepoUrl.trim()) {
       fetchUrl = `http://localhost:8000/api/v1/github/public-pulls?repo_url=${encodeURIComponent(publicRepoUrl.trim())}`;
     } else if (selectedRepo) {
-      const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
-      const repo = scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
-      fetchUrl = `http://localhost:8000/api/v1/github/repos/${owner}/${repo}/pulls`;
+      let owner = "";
+      let repo = selectedRepo;
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        repo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          repo = target.name;
+        }
+      }
+      if (owner && repo) {
+        fetchUrl = `http://localhost:8000/api/v1/github/repos/${owner}/${repo}/pulls`;
+      }
     }
 
     if (!fetchUrl) {
@@ -127,7 +141,7 @@ export default function Home() {
       })
       .catch(err => console.error("Failed to load PRs:", err))
       .finally(() => setIsLoadingPRs(false));
-  }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName]);
+  }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName, repositories]);
 
   // Load Repositories from backend
   useEffect(() => {
@@ -142,7 +156,7 @@ export default function Home() {
       .then((data) => {
         setRepositories(data);
         if (data.length > 0) {
-          setSelectedRepo(data[0].name);
+          setSelectedRepo(data[0].full_name || data[0].name);
         }
       })
       .catch((err) => {
@@ -155,9 +169,23 @@ export default function Home() {
   const runAnalysis = async () => {
     setIsLoading(true);
     try {
+      let owner = "";
+      let repo = selectedRepo;
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        repo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          repo = target.name;
+        }
+      }
+
       const payload = {
-        owner: "abhinav26999",
-        repo: selectedRepo,
+        owner: owner,
+        repo: repo,
         installation_id: null
       };
 
@@ -257,17 +285,34 @@ export default function Home() {
 
   // Run AI PR Review (Stage 6)
   const triggerPRReview = async () => {
-    const targetRepo = scanMode === "github" ? selectedRepo : scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
+    let owner = "";
+    let targetRepo = "";
 
-    if (!targetRepo) {
+    if (scanMode === "public" && scannedRepoName && scannedRepoName.includes("/")) {
+      const parts = scannedRepoName.split("/");
+      owner = parts[0];
+      targetRepo = parts[1];
+    } else if (selectedRepo) {
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        targetRepo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          targetRepo = target.name;
+        }
+      }
+    }
+
+    if (!targetRepo || !owner) {
       setAiReview("Please select a repository from the 'GitHub App Repos' tab or run a Quick Scan first.");
       return;
     }
 
     setIsReviewing(true);
     setAiReview("");
-
-    const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
 
     try {
       const payload = {
@@ -468,7 +513,7 @@ export default function Home() {
                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                 >
                   {repositories.map((repo) => (
-                    <option key={repo.name} value={repo.name}>
+                    <option key={repo.full_name || repo.name} value={repo.full_name || repo.name}>
                       {repo.full_name || repo.name}
                     </option>
                   ))}
