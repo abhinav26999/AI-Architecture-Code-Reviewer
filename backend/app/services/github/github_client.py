@@ -177,6 +177,30 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
+    async def list_pull_requests(self, installation_id: int, owner: str, repo: str) -> List[Dict[str, Any]]:
+        """Lists open pull requests for a specific repository."""
+        token = await self.get_installation_token(installation_id)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=30"
+            try:
+                response = await client.get(url, headers=headers)
+                if response.status_code != 200:
+                    raise GitHubAPIError(
+                        f"Failed to list pull requests for {owner}/{repo}: {response.text}",
+                        status_code=response.status_code,
+                        response_body=response.text
+                    )
+                return response.json()
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
     async def get_pull_request_files(self, installation_id: int, owner: str, repo: str, pull_number: int) -> List[Dict[str, Any]]:
         """Fetches the list of files modified in a pull request, including diff patches."""
         token = await self.get_installation_token(installation_id)

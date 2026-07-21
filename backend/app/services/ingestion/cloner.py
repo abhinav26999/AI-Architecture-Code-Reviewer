@@ -163,14 +163,25 @@ class RepositoryCloner:
                 err_msg = stderr.decode().strip()
                 if active_token:
                     err_msg = err_msg.replace(active_token, "******")
-                logger.error(f"Git clone failed: {err_msg}")
+                logger.error(f"Git clone failed for {host}/{owner}/{repo}: {err_msg}")
                 self.cleanup_clone(clone_path)
-                raise ClonerError(f"Git clone failed: {err_msg}")
-                logger.error(f"Public git clone failed: {err_msg}")
-                self.cleanup_clone(clone_path)
-                raise ClonerError(f"Git clone failed. The repository may be private or does not exist: {err_msg}")
+                
+                # Check for private repository authentication requirement
+                is_private_auth = any(term in err_msg.lower() for term in [
+                    "authentication failed", "repository not found", "could not read username",
+                    "terminal prompts disabled", "http 403", "access denied", "401"
+                ])
+                
+                if is_private_auth and not active_token:
+                    raise ClonerError(
+                        f"PRIVATE_REPO_AUTH_REQUIRED:{host}:{owner}:{repo}: "
+                        f"This repository appears to be private or requires authentication on {host}. "
+                        f"Please grant access token permissions for {owner}/{repo}."
+                    )
+                else:
+                    raise ClonerError(f"Git clone failed: {err_msg}")
 
-            logger.info(f"Successfully cloned public repo {owner}/{repo} to {clone_path}")
+            logger.info(f"Successfully cloned repo {owner}/{repo} from {host} to {clone_path}")
             return clone_path, owner, repo
 
         except Exception as e:

@@ -87,6 +87,47 @@ async def list_repositories(installation_id: Optional[int] = Query(None, descrip
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
+@router.get("/public-pulls")
+async def list_public_pull_requests(
+    repo_url: str = Query(..., description="Repository URL (e.g. https://github.com/owner/repo)")
+):
+    """Fetches list of pull requests for any GitHub URL."""
+    import re
+    import httpx
+
+    match = re.match(r"https?://(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+    if not match:
+        return []
+
+    owner, repo = match.group(1), match.group(2)
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=30"
+
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "AI-Architecture-Code-Reviewer"}
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(api_url, headers=headers, timeout=5.0)
+            if res.status_code == 200:
+                return res.json()
+            return []
+    except Exception:
+        return []
+
+
+@router.get("/repos/{owner}/{repo}/pulls")
+async def list_open_pull_requests(
+    owner: str,
+    repo: str,
+    installation_id: Optional[int] = Query(None, description="GitHub App Installation ID")
+):
+    """Lists pull requests for a repository."""
+    try:
+        inst_id = await get_effective_installation_id(installation_id)
+        pulls = await github_client.list_pull_requests(inst_id, owner, repo)
+        return pulls
+    except GitHubAPIError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
 @router.get("/repos/{owner}/{repo}/pulls/{pull_number}", response_model=GitHubPullRequest)
 async def get_pull_request(
     owner: str,

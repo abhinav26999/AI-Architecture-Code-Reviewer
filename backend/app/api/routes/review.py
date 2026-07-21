@@ -153,6 +153,7 @@ async def analyze_and_review_pr(request: PRReviewRequest, raw_request: Request):
             detail=f"Failed to fetch pull request files from GitHub: {str(e)}"
         )
 
+    modified_files_set = set(f.get("filename", "") for f in files if f.get("filename"))
     diffs_list = []
     for f in files:
         filename = f.get("filename", "")
@@ -212,7 +213,15 @@ async def analyze_and_review_pr(request: PRReviewRequest, raw_request: Request):
             clone_path=clone_path
         )
 
-        violations_messages = [v.message for v in review_results.violations]
+        # Filter violations specifically to files modified in this PR
+        pr_violations = []
+        if modified_files_set:
+            for v in review_results.violations:
+                v_file = getattr(v, "file_path", "")
+                if any(m_file in v_file or m_file in v.message for m_file in modified_files_set):
+                    pr_violations.append(v)
+        
+        violations_messages = [v.message for v in pr_violations] if pr_violations else ["No static rule violations in modified PR files."]
 
         # 6. Query pgvector RAG for historical incident context matching the violations
         incidents_found = []
@@ -263,7 +272,13 @@ async def analyze_and_review_pr(request: PRReviewRequest, raw_request: Request):
         return {
             "status": "success",
             "message": f"Architectural review comment posted to PR #{request.pull_number} successfully.",
-            "review_body": review_comment
+            "review_body": review_comment,
+            "score": review_results.score,
+            "violations": violations_messages,
+            "modified_files": list(modified_files_set),
+            "owner": request.owner,
+            "repo": request.repo,
+            "pull_number": request.pull_number
         }
 
     finally:

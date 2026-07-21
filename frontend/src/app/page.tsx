@@ -21,6 +21,7 @@ import {
 import confetti from "canvas-confetti";
 import DependencyGraph from "../components/DependencyGraph";
 import SettingsModal from "../components/SettingsModal";
+import PrivateRepoAuthModal from "../components/PrivateRepoAuthModal";
 import { getApiHeaders, loadSettings, AppSettings } from "../utils/settings";
 
 interface Violation {
@@ -39,10 +40,22 @@ interface Repository {
   default_branch: string;
 }
 
+interface PRReviewResponse {
+  status: string;
+  message: string;
+  review_body: string;
+  score?: number;
+  violations?: string[];
+  modified_files?: string[];
+  owner?: string;
+  repo?: string;
+  pull_number?: number;
+}
+
 export default function Home() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"overview" | "graph" | "review">("overview");
+  const [activeTab, setActiveTab] = useState<"violations" | "graph" | "review">("violations");
   
   const [score, setScore] = useState<number>(100);
   const [violations, setViolations] = useState<Violation[]>([]);
@@ -51,6 +64,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [prNumber, setPrNumber] = useState<string>("1");
   const [aiReview, setAiReview] = useState<string>("");
+  const [prReviewData, setPrReviewData] = useState<PRReviewResponse | null>(null);
   const [isReviewing, setIsReviewing] = useState<boolean>(false);
   
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
@@ -63,13 +77,57 @@ export default function Home() {
   const [scannedRepoName, setScannedRepoName] = useState<string>("");
   const [isFetchingRepos, setIsFetchingRepos] = useState<boolean>(false);
 
+  // PR Selection State
+  const [openPRs, setOpenPRs] = useState<any[]>([]);
+  const [isLoadingPRs, setIsLoadingPRs] = useState<boolean>(false);
+
   // Settings Modal State
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [currentSettings, setCurrentSettings] = useState<AppSettings>(loadSettings());
 
+  // Private Repo Authorization Modal State
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalDetails, setAuthModalDetails] = useState<{ platform: string; owner: string; repo: string }>({
+    platform: "github.com",
+    owner: "",
+    repo: ""
+  });
+
   useEffect(() => {
     setCurrentSettings(loadSettings());
   }, []);
+
+  // Fetch PRs when selectedRepo, publicRepoUrl, or scanMode changes
+  useEffect(() => {
+    setIsLoadingPRs(true);
+    let fetchUrl = "";
+
+    if (scanMode === "public" && publicRepoUrl.trim()) {
+      fetchUrl = `http://localhost:8000/api/v1/github/public-pulls?repo_url=${encodeURIComponent(publicRepoUrl.trim())}`;
+    } else if (selectedRepo) {
+      const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
+      const repo = scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
+      fetchUrl = `http://localhost:8000/api/v1/github/repos/${owner}/${repo}/pulls`;
+    }
+
+    if (!fetchUrl) {
+      setIsLoadingPRs(false);
+      return;
+    }
+
+    fetch(fetchUrl, { headers: getApiHeaders() })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) {
+          setOpenPRs(data);
+          if (data.length > 0) {
+            setPrNumber(data[0].number.toString());
+          }
+        }
+      })
+      .catch(err => console.error("Failed to load PRs:", err))
+      .finally(() => setIsLoadingPRs(false));
+  }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName]);
 
   // Load Repositories from backend
   useEffect(() => {
@@ -164,7 +222,18 @@ export default function Home() {
 
       if (!reviewRes.ok) {
         const errData = await reviewRes.json().catch(() => ({}));
-        throw new Error(errData.detail || "Failed to scan repository.");
+        const detail = errData.detail || "";
+        if (detail.includes("PRIVATE_REPO_AUTH_REQUIRED")) {
+          const parts = detail.split(":");
+          const host = parts[1] || "github.com";
+          const owner = parts[2] || "";
+          const repo = parts[3] || "";
+          setAuthModalDetails({ platform: host, owner, repo });
+          setIsAuthModalOpen(true);
+          setIsLoading(false);
+          return;
+        }
+        throw new Error(detail || "Failed to scan repository.");
       }
 
       const reviewData = await reviewRes.json();
@@ -236,17 +305,17 @@ export default function Home() {
       <header className="border-b border-slate-200 bg-white sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-md shadow-indigo-500/20">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <span className="font-bold text-lg tracking-tight text-slate-900">
-                Antigravity Reviewer
-              </span>
-              <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                v1.0.0
-              </span>
-            </div>
+              <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-md shadow-indigo-600/20">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="font-bold text-lg text-slate-900 tracking-tight">
+                  AI Code Architect
+                </span>
+                <span className="ml-2 text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">
+                  v1.0.0
+                </span>
+              </div>
           </div>
 
           <div className="flex items-center space-x-3">
@@ -422,8 +491,8 @@ export default function Home() {
         {/* TABS */}
         <div className="flex border-b border-slate-200 mt-8 space-x-6 text-sm font-bold">
           <button 
-            onClick={() => setActiveTab("overview")}
-            className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "overview" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+            onClick={() => setActiveTab("violations")}
+            className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "violations" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
           >
             <ShieldAlert className="w-4 h-4" />
             <span>Architecture Violations</span>
@@ -448,7 +517,7 @@ export default function Home() {
         <div className="mt-8">
           
           {/* TAB 1: VIOLATIONS OVERVIEW */}
-          {activeTab === "overview" && (
+          {activeTab === "violations" && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
               {/* LEFT & CENTER CARD: SCORECARD & LIST */}
@@ -619,53 +688,102 @@ export default function Home() {
             <div className="max-w-3xl mx-auto space-y-6">
               
               {/* TRIGGER SECTION */}
-              <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-6">
+              <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-5">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Trigger AI Pull Request Critique</h3>
+                  <h3 className="text-lg font-bold text-slate-900">Audit Pull Request Changes & Comment</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Connects to your repository's Pull Request page, crawls code changes, matches semantic post-mortem insights, and publishes review summaries to GitHub.
+                    Connects to your repository's Pull Request page, analyzes proposed code diffs, evaluates architecture rules, and publishes automated review critiques to GitHub.
                   </p>
                 </div>
 
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
-                    <span className="text-xs text-slate-500 font-semibold">PR Number:</span>
-                    <input
-                      type="number"
-                      value={prNumber}
-                      onChange={(e) => setPrNumber(e.target.value)}
-                      className="bg-transparent text-slate-900 font-bold text-sm w-16 focus:outline-none"
-                    />
+                {/* What is a PR Banner */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start gap-2.5">
+                  <GitPullRequest className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-900">What is a Pull Request (PR)?</span>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                      A Pull Request is a set of code changes submitted by a developer. Each PR has a unique number (e.g. PR #1). Select an open PR below or enter its number to generate and publish an AI review directly to GitHub.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                  
+                  {/* PR Selector Dropdown or Manual Input */}
+                  <div className="md:col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        {openPRs.length > 0 ? `Select Pull Request (${openPRs.length} found)` : "Enter PR Number"}
+                      </label>
+                      {isLoadingPRs && (
+                        <span className="text-[10px] text-slate-400 animate-pulse font-semibold">Loading PRs...</span>
+                      )}
+                    </div>
+
+                    {openPRs.length > 0 ? (
+                      <select
+                        value={prNumber}
+                        onChange={(e) => setPrNumber(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:border-indigo-500 shadow-sm font-sans"
+                      >
+                        {openPRs.map((pr) => {
+                          const stateLabel = pr.merged_at ? "MERGED" : pr.state ? pr.state.toUpperCase() : "OPEN";
+                          const author = pr.user?.login ? `@${pr.user.login}` : "author";
+                          const branch = pr.head?.ref ? `[${pr.head.ref}]` : "";
+                          return (
+                            <option key={pr.id || pr.number} value={pr.number}>
+                              PR #{pr.number}: {pr.title} ({author}) {branch} — {stateLabel}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <div className="flex items-center space-x-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                        <span className="text-xs text-slate-500 font-semibold">PR #:</span>
+                        <input
+                          type="number"
+                          value={prNumber}
+                          onChange={(e) => setPrNumber(e.target.value)}
+                          placeholder="1"
+                          className="bg-transparent text-slate-900 font-bold text-sm w-full focus:outline-none"
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  <button
-                    onClick={triggerPRReview}
-                    disabled={isReviewing}
-                    className="flex-1 flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl font-bold bg-gradient-to-tr from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-md disabled:opacity-50 transition duration-200"
-                  >
-                    {isReviewing ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Synthesizing AI Review...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4" />
-                        <span>Generate & Comment PR Review</span>
-                      </>
-                    )}
-                  </button>
+                  {/* Trigger Button */}
+                  <div className="md:col-span-1 pt-4 md:pt-0">
+                    <label className="hidden md:block text-xs font-semibold text-transparent mb-1">Action</label>
+                    <button
+                      onClick={triggerPRReview}
+                      disabled={isReviewing || !prNumber}
+                      className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 transition text-xs cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isReviewing ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Reviewing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Audit PR #{prNumber}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
                 </div>
               </div>
 
               {/* REVIEW BOARD */}
               {aiReview && (
-                <div className="p-8 rounded-2xl border border-slate-200 bg-white shadow-sm text-sm leading-relaxed space-y-4">
+                <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm text-sm leading-relaxed space-y-4">
                   <div className="pb-4 border-b border-slate-200 flex items-center justify-between">
-                    <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest flex items-center space-x-2">
-                      <CheckCircle className="w-4 h-4 text-indigo-600" />
-                      <span>Review Published on GitHub PR #{prNumber}</span>
-                    </span>
+                    <div className="flex items-center gap-2 text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm">
+                      <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span>Code Review Published to Pull Request #{prNumber}</span>
+                    </div>
                   </div>
 
                   {/* Displaying review markup */}
@@ -687,6 +805,19 @@ export default function Home() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onSettingsSaved={(newSettings) => setCurrentSettings(newSettings)}
+      />
+
+      {/* PRIVATE REPO AUTHORIZATION MODAL */}
+      <PrivateRepoAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        platform={authModalDetails.platform}
+        owner={authModalDetails.owner}
+        repo={authModalDetails.repo}
+        onTokenSavedAndRetry={() => {
+          setCurrentSettings(loadSettings());
+          runPublicScan();
+        }}
       />
     </div>
   );
