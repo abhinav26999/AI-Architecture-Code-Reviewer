@@ -75,12 +75,10 @@ class AIClient:
                     system_prompt=system_prompt
                 )
             else:
-                logger.warning(f"Unknown LLM provider '{llm_provider}'. Falling back to offline review.")
-                return self._get_mock_review(diffs, violations, score)
+                raise ValueError(f"Unsupported LLM provider '{llm_provider}'. Please configure Ollama, OpenAI, or Gemini in Settings.")
         except Exception as e:
             logger.error(f"AI generation failed for provider '{llm_provider}': {e}")
-            mock_review = self._get_mock_review(diffs, violations, score)
-            return f"⚠️ **AI Review Warning**: Failed to reach {llm_provider.upper()} ({str(e)}). Showing deterministic review:\n\n{mock_review}"
+            raise RuntimeError(f"AI Review Generation Failed ({llm_provider.upper()}): {str(e)}")
 
     async def _generate_ollama_review(
         self,
@@ -265,28 +263,6 @@ class AIClient:
         except Exception as e:
             logger.warning(f"Ollama AI scan skipped for '{file_path}' (AI service offline or timed out): {e}")
             return []
-
-    def _get_mock_review(self, diffs: str, violations: List[str], score: float) -> str:
-        """Returns a cleanly formatted fallback review if the LLM cannot be accessed."""
-        violations_str = "\n".join(f"- {v}" for v in violations) if violations else "No static violations found."
-        
-        risk = "LOW"
-        if score < 70:
-            risk = "CRITICAL"
-        elif score < 90:
-            risk = "MEDIUM"
-            
-        return (
-            "## 🤖 Automated Architecture Code Review\n\n"
-            "### 📊 Summary & Score\n"
-            f"- **Architectural Score**: {score}/100\n"
-            f"- **Risk Assessment**: {risk}\n\n"
-            "### ⚠️ Violations & Structural Concerns\n"
-            f"{violations_str}\n\n"
-            "### 💡 Actionable Fixes\n"
-            "1. **Clean Architecture Boundary**: Avoid importing database or repository utilities directly inside controllers. Instead, inject a Service class layer to handle query execution.\n"
-            "2. **N+1 Loops**: Ensure database calls are batched using bulk operations rather than executing model saves inside loop blocks."
-        )
 
 
 # Singleton instance
