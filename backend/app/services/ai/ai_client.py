@@ -13,25 +13,18 @@ class AIClient:
         diffs: str,
         violations: List[str],
         related_incidents: List[str],
-        score: float
+        score: float,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        ollama_url: Optional[str] = None
     ) -> str:
         """
         Generates a comprehensive architectural code review critique in Markdown
-        using the configured LLM provider.
+        using the configured or user-specified LLM provider (Ollama, OpenAI, Gemini).
         """
-        if settings.LLM_PROVIDER == "ollama":
-            return await self._generate_ollama_review(diffs, violations, related_incidents, score)
-        else:
-            raise ValueError(f"Unsupported or unconfigured LLM provider '{settings.LLM_PROVIDER}'.")
+        llm_provider = (provider or settings.LLM_PROVIDER).lower().strip()
 
-    async def _generate_ollama_review(
-        self,
-        diffs: str,
-        violations: List[str],
-        related_incidents: List[str],
-        score: float
-    ) -> str:
-        """Connects to local Ollama instance to generate the architectural review."""
         system_prompt = (
             "You are Antigravity, an expert AI Software Architect reviewing a developer's Pull Request.\n"
             "Your task is to analyze the changed files (Git diffs), static analysis violations, and RAG post-mortem contexts.\n"
@@ -54,37 +47,155 @@ class AIClient:
             f"Generate the architectural PR review:"
         )
 
+        try:
+            if llm_provider == "openai":
+                return await self._generate_openai_review(
+                    api_key=api_key,
+                    model=model or "gpt-4o-mini",
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            elif llm_provider == "gemini":
+                return await self._generate_gemini_review(
+                    api_key=api_key,
+                    model=model or "gemini-1.5-flash",
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            elif llm_provider == "ollama":
+                return await self._generate_ollama_review(
+                    model=model or settings.OLLAMA_GEN_MODEL,
+                    ollama_url=ollama_url or settings.OLLAMA_GEN_URL,
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            else:
+                logger.warning(f"Unknown LLM provider '{llm_provider}'. Falling back to offline review.")
+                return self._get_mock_review(diffs, violations, score)
+        except Exception as e:
+            logger.error(f"AI generation failed for provider '{llm_provider}': {e}")
+            mock_review = self._get_mock_review(diffs, violations, score)
+            return f"⚠️ **AI Review Warning**: Failed to reach {llm_provider.upper()} ({str(e)}). Showing deterministic review:\n\n{mock_review}"
+
+    async def _generate_ollama_review(
+        self,
+        model: str,
+        ollama_url: str,
+        user_prompt: str,
+        system_prompt: str
+    ) -> str:
+        """Connects to local Ollama instance to generate the architectural review."""
+        gen_url = ollama_url
+        if "/api/" not in gen_url:
+            gen_url = f"{ollama_url.rstrip('/')}/api/generate"
+
         payload = {
-            "model": settings.OLLAMA_GEN_MODEL,
+            "model": model,
             "prompt": user_prompt,
             "system": system_prompt,
             "stream": False
         }
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    settings.OLLAMA_GEN_URL,
-                    json=payload,
-                    timeout=60.0
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                gen_url,
+                json=payload,
+                timeout=60.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "response" in data:
+                    return data["response"]
+                raise ValueError(f"Ollama response missing 'response' field: {data}")
+            else:
+                raise httpx.HTTPStatusError(
+                    f"Ollama returned HTTP {response.status_code}",
+                    request=response.request,
+                    response=response
                 )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Ollama return: {"response": "..."}
-                    if "response" in data:
-                        return data["response"]
-                    else:
-                        raise ValueError(f"Ollama response missing 'response' text: {data}")
-                else:
-                    raise httpx.HTTPStatusError(
-                        f"Ollama returned status code {response.status_code}",
-                        request=response.request,
-                        response=response
-                    )
-        except Exception as e:
-            logger.error(f"Failed to query Ollama for review generation: {e}")
-            raise e
+
+    async def _generate_openai_review(
+        self,
+        api_key: Optional[str],
+        model: str,
+        user_prompt: str,
+        system_prompt: str
+    ) -> str:
+        """Connects to OpenAI API using user API key or environment key."""
+        key = api_key or getattr(settings, "OPENAI_API_KEY", "")
+        if not key:
+            raise ValueError("OpenAI API key missing. Please configure OpenAI Key in settings.")
+
+        headers = {
+            "Authorization": f"Bearer {key.strip()}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2
+        }
+
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=45.0
+            )
+            if res.status_code == 200:
+                data = res.json()
+                return data["choices"][0]["message"]["content"]
+            elif res.status_code == 401:
+                raise ValueError("Invalid OpenAI API Key (HTTP 401 Unauthorized).")
+            elif res.status_code == 429:
+                raise ValueError("OpenAI API Rate Limit Exceeded or Out of Credits (HTTP 429).")
+            else:
+                raise ValueError(f"OpenAI API error ({res.status_code}): {res.text}")
+
+    async def _generate_gemini_review(
+        self,
+        api_key: Optional[str],
+        model: str,
+        user_prompt: str,
+        system_prompt: str
+    ) -> str:
+        """Connects to Google Gemini API using user API key."""
+        key = api_key or getattr(settings, "GEMINI_API_KEY", "")
+        if not key:
+            raise ValueError("Google Gemini API key missing. Please configure Gemini Key in settings.")
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key.strip()}"
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"{system_prompt}\n\n{user_prompt}"}
+                    ]
+                }
+            ]
+        }
+
+        async with httpx.AsyncClient() as client:
+            res = await client.post(url, json=payload, timeout=45.0)
+            if res.status_code == 200:
+                data = res.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "")
+                raise ValueError(f"Gemini returned empty text candidate: {data}")
+            elif res.status_code == 400 or res.status_code == 403:
+                raise ValueError(f"Invalid Gemini API Key or model error ({res.status_code}).")
+            else:
+                raise ValueError(f"Gemini API error ({res.status_code}): {res.text}")
 
     async def scan_file_ast_rules(
         self,
@@ -92,7 +203,7 @@ class AIClient:
         content: str
     ) -> List[dict]:
         """
-        Queries the local Ollama model in JSON format to perform a structural check
+        Queries local Ollama model in JSON format to perform a structural check
         on code files of any language (including C, C++, Go, Rust, Java, etc.).
         """
         system_prompt = (
@@ -161,16 +272,15 @@ class AIClient:
             risk = "MEDIUM"
             
         return (
-            "## 🤖 Antigravity Architecture Code Review (Offline Mock)\n\n"
+            "## 🤖 Antigravity Architecture Code Review (Deterministic Engine Review)\n\n"
             "### 📊 Summary & Score\n"
             f"- **Architectural Score**: {score}/100\n"
-            f"- **Risk Assessment**: {risk}\n"
-            "- *Note: Local Ollama server is offline or unreachable. Displaying deterministic engine results.*\n\n"
+            f"- **Risk Assessment**: {risk}\n\n"
             "### ⚠️ Violations & Structural Concerns\n"
             f"{violations_str}\n\n"
             "### 💡 Actionable Fixes\n"
-            "1. **Clean Architecture Boundary**: Avoid importing `src/db/db.ts` or database utilities directly inside controllers. Instead, inject a Service class layer (e.g. `src/services/applyJob.service.ts`) to handle query execution.\n"
-            "2. **N+1 Loops**: Ensure queries are batched using `In` operators or bulk inserts rather than executing model saves inside loop blocks."
+            "1. **Clean Architecture Boundary**: Avoid importing database or repository utilities directly inside controllers. Instead, inject a Service class layer to handle query execution.\n"
+            "2. **N+1 Loops**: Ensure database calls are batched using bulk operations rather than executing model saves inside loop blocks."
         )
 
 

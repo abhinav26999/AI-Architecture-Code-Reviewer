@@ -18,19 +18,30 @@ class RepositoryCloner:
     def __init__(self):
         self.base_dir = settings.resolved_temp_clone_dir
 
-    async def clone_repository(self, owner: str, repo: str, installation_id: int) -> str:
+    async def clone_repository(
+        self,
+        owner: str,
+        repo: str,
+        installation_id: Optional[int] = None,
+        github_token: Optional[str] = None
+    ) -> str:
         """
-        Shallow clones a GitHub repository using the installation access token.
+        Shallow clones a GitHub repository using either a user-provided PAT (github_token)
+        or a GitHub App installation access token.
         Clones into a unique directory within backend/temp_clones/ and returns the path.
         """
         # Ensure base clones directory exists
         os.makedirs(self.base_dir, exist_ok=True)
 
-        try:
-            token = await github_client.get_installation_token(installation_id)
-        except GitHubAPIError as e:
-            logger.error(f"Failed to get installation token for cloning: {e}")
-            raise ClonerError(f"Authentication failure: {str(e)}")
+        token = None
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        elif installation_id is not None:
+            try:
+                token = await github_client.get_installation_token(installation_id)
+            except GitHubAPIError as e:
+                logger.error(f"Failed to get installation token for cloning: {e}")
+                raise ClonerError(f"Authentication failure: {str(e)}")
 
         # Create unique subdirectory name
         unique_id = uuid.uuid4().hex[:10]
@@ -43,7 +54,10 @@ class RepositoryCloner:
             raise ClonerError("Invalid clone target path generated.")
 
         # Construct authentication clone URL
-        clone_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+        if token:
+            clone_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+        else:
+            clone_url = f"https://github.com/{owner}/{repo}.git"
 
         logger.info(f"Cloning {owner}/{repo} (depth=1) into {clone_path}...")
         
@@ -83,9 +97,16 @@ class RepositoryCloner:
                 raise ClonerError(f"Unexpected cloner error: {str(e)}")
             raise
 
-    async def clone_public_repository(self, repo_url: str) -> tuple:
+    async def clone_public_repository(
+        self,
+        repo_url: str,
+        github_token: Optional[str] = None,
+        gitlab_token: Optional[str] = None,
+        bitbucket_token: Optional[str] = None
+    ) -> tuple:
         """
-        Shallow clones a public GitHub repository using its URL (no authentication).
+        Shallow clones a public or private repository from GitHub, GitLab, or Bitbucket.
+        Uses authentication tokens if provided for private repositories.
         Returns a tuple of (clone_path, owner, repo).
         """
         import re
@@ -95,10 +116,10 @@ class RepositoryCloner:
         if not match:
             raise ClonerError(
                 f"Invalid Git URL format: '{repo_url}'. "
-                "Expected public URL from GitHub, Bitbucket, or GitLab (e.g. https://bitbucket.org/workspace/repo)"
+                "Expected URL from GitHub, Bitbucket, or GitLab (e.g. https://bitbucket.org/workspace/repo)"
             )
 
-        host = match.group(1)
+        host = match.group(1).lower()
         owner = match.group(2)
         repo = match.group(3)
 
@@ -112,10 +133,21 @@ class RepositoryCloner:
         if not clone_path.startswith(os.path.abspath(self.base_dir)):
             raise ClonerError("Invalid clone target path generated.")
 
-        # Public clone URL
-        clone_url = f"https://{host}/{owner}/{repo}.git"
+        # Construct authenticated clone URL depending on host & available token
+        active_token = None
+        if host == "github.com" and github_token and github_token.strip():
+            active_token = github_token.strip()
+            clone_url = f"https://x-access-token:{active_token}@github.com/{owner}/{repo}.git"
+        elif host == "gitlab.com" and gitlab_token and gitlab_token.strip():
+            active_token = gitlab_token.strip()
+            clone_url = f"https://oauth2:{active_token}@gitlab.com/{owner}/{repo}.git"
+        elif host == "bitbucket.org" and bitbucket_token and bitbucket_token.strip():
+            active_token = bitbucket_token.strip()
+            clone_url = f"https://x-token-auth:{active_token}@bitbucket.org/{owner}/{repo}.git"
+        else:
+            clone_url = f"https://{host}/{owner}/{repo}.git"
 
-        logger.info(f"Cloning public repo {owner}/{repo} from {host} (depth=1) into {clone_path}...")
+        logger.info(f"Cloning repo {owner}/{repo} from {host} (depth=1) into {clone_path}...")
 
         cmd = ["git", "clone", "--depth", "1", clone_url, clone_path]
 
@@ -129,6 +161,11 @@ class RepositoryCloner:
 
             if process.returncode != 0:
                 err_msg = stderr.decode().strip()
+                if active_token:
+                    err_msg = err_msg.replace(active_token, "******")
+                logger.error(f"Git clone failed: {err_msg}")
+                self.cleanup_clone(clone_path)
+                raise ClonerError(f"Git clone failed: {err_msg}")
                 logger.error(f"Public git clone failed: {err_msg}")
                 self.cleanup_clone(clone_path)
                 raise ClonerError(f"Git clone failed. The repository may be private or does not exist: {err_msg}")

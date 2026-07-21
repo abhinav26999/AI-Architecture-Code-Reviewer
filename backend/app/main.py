@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.routes import github, ingest, graph, review
+from app.api.routes import github, ingest, graph, review, ollama
 
 # Configure Logging (Writes to backend/app.log and console)
 log_file = "app.log"
@@ -20,6 +20,12 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("app")
+
+
+SENSITIVE_HEADERS = {
+    "x-openai-key", "x-gemini-key", "x-github-token",
+    "authorization", "x-access-token", "x-api-key"
+}
 
 
 @asynccontextmanager
@@ -49,7 +55,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# HTTP Request Logging Middleware
+# HTTP Request Logging Middleware (Scrubs sensitive API keys and tokens)
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
@@ -57,6 +63,14 @@ async def log_requests(request: Request, call_next):
     method = request.method
     client_host = request.client.host if request.client else "unknown"
     
+    # Scrub sensitive headers if any custom headers are present
+    logged_headers = {}
+    for key, val in request.headers.items():
+        if key.lower() in SENSITIVE_HEADERS:
+            logged_headers[key] = "******"
+        else:
+            logged_headers[key] = val
+
     logger.info(f"Incoming Request: {method} {path} from {client_host}")
     
     try:
@@ -105,6 +119,12 @@ app.include_router(
     review.router,
     prefix=f"{settings.API_V1_STR}/review",
     tags=["review"],
+)
+
+app.include_router(
+    ollama.router,
+    prefix=f"{settings.API_V1_STR}/ollama",
+    tags=["ollama"],
 )
 
 
