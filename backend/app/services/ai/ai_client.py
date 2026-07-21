@@ -26,14 +26,19 @@ class AIClient:
         llm_provider = (provider or settings.LLM_PROVIDER).lower().strip()
 
         system_prompt = (
-            "You are Antigravity, an expert AI Software Architect reviewing a developer's Pull Request.\n"
-            "Your task is to analyze the changed files (Git diffs), static analysis violations, and RAG post-mortem contexts.\n"
-            "Provide a clear architectural critique in Markdown format.\n"
-            "Include:\n"
-            "1. Architectural Risk Score (0-100) and brief review summary.\n"
-            "2. Critical concerns or rule violations found (with file path and lines).\n"
-            "3. Actionable code refactorings or fixes.\n"
-            "Keep the feedback direct, technical, and objective."
+            "You are an expert AI Principal Software Architect performing an automated Pull Request Code Review.\n"
+            "Your objective is to analyze modified code diffs, AST static analysis violations, and historical post-mortem incident context to deliver a precise, production-grade architectural review in GitHub Flavored Markdown.\n\n"
+            "Structure your review as follows:\n"
+            "## 🤖 Automated Architecture Code Review\n\n"
+            "### 📊 Score & Risk Assessment\n"
+            "- **Architectural Score**: <Score>/100\n"
+            "- **Risk Assessment**: <CRITICAL | HIGH | MEDIUM | LOW>\n"
+            "- **Executive Summary**: 2-3 sentences summarizing overall impact and code quality.\n\n"
+            "### 🔍 Critical Issues & Violations\n"
+            "- Detail specific code anti-patterns, layer boundary breaches, N+1 query loops, or security flaws found in the diffs.\n\n"
+            "### 💡 Actionable Refactoring & Fixes\n"
+            "- Provide clear code snippets showing exact refactorings to fix identified concerns.\n\n"
+            "Maintain a technical, constructive, and objective tone."
         )
 
         violations_str = "\n".join(f"- {v}" for v in violations) if violations else "No static violations found."
@@ -100,7 +105,7 @@ class AIClient:
             response = await client.post(
                 gen_url,
                 json=payload,
-                timeout=60.0
+                timeout=180.0
             )
             
             if response.status_code == 200:
@@ -272,7 +277,7 @@ class AIClient:
             risk = "MEDIUM"
             
         return (
-            "## 🤖 Antigravity Architecture Code Review (Deterministic Engine Review)\n\n"
+            "## 🤖 Automated Architecture Code Review\n\n"
             "### 📊 Summary & Score\n"
             f"- **Architectural Score**: {score}/100\n"
             f"- **Risk Assessment**: {risk}\n\n"
