@@ -30,6 +30,17 @@ class PublicScanRequest(BaseModel):
     repo_url: str
 
 
+class FixSuggestionRequest(BaseModel):
+    rule_name: str
+    message: str
+    file_path: str
+    code_snippet: Optional[str] = None
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    ollama_url: Optional[str] = None
+
+
 # Supported extensions
 SUPPORTED_EXTENSIONS = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
@@ -239,16 +250,24 @@ async def analyze_and_review_pr(request: PRReviewRequest, raw_request: Request):
             logger.error(f"Failed to query RAG database in PR review: {e}")
 
         # 7. Generate AI Review comment
-        review_comment = await ai_client.generate_pr_review(
-            diffs=diffs_str,
-            violations=violations_messages,
-            related_incidents=incidents_found,
-            score=review_results.score,
-            provider=llm_provider,
-            api_key=api_key,
-            model=ollama_model if llm_provider == "ollama" else None,
-            ollama_url=ollama_url
-        )
+        try:
+            review_comment = await ai_client.generate_pr_review(
+                diffs=diffs_str,
+                violations=violations_messages,
+                related_incidents=incidents_found,
+                score=review_results.score,
+                provider=llm_provider,
+                api_key=api_key,
+                model=ollama_model if llm_provider == "ollama" else None,
+                ollama_url=ollama_url
+            )
+        except Exception as e:
+            logger.error(f"AI Review generation failed or timed out: {e}")
+            return {
+                "status": "error",
+                "message": f"AI Review generation timed out or failed: {str(e)}",
+                "review_body": f"⚠️ **AI Review Generation Timed Out**: The local LLM ({llm_provider.upper()}) timed out processing this PR diff ({str(e)}).\n\n**Suggestions to fix:**\n1. Use a faster Ollama model (e.g. `qwen2.5:7b` or `qwen2.5-coder` instead of large models).\n2. Or switch to Cloud LLMs (**OpenAI** / **Gemini**) in **`⚙️ Settings`** for instant response times."
+            }
 
         # 8. Post review comment to GitHub PR
         try:
@@ -346,10 +365,50 @@ async def scan_public_repository(request: PublicScanRequest, raw_request: Reques
             graph=graph,
             clone_path=clone_path
         )
-
-        return review_results
-
+        return {
+            "owner": owner,
+            "repo": repo,
+            "score": review_results.score,
+            "violations": review_results.violations
+        }
     finally:
-        # 5. Clean up cloned codebase folder
+        # 5. Clean up temporary clone directory
         repo_cloner.cleanup_clone(clone_path)
 
+
+@router.post("/fix-suggestion")
+async def generate_ai_fix_suggestion(request: FixSuggestionRequest, raw_request: Request):
+    """
+    Calls AI (Ollama / OpenAI / Gemini) to generate step-by-step text-only refactoring suggestions.
+    Does NOT output full code snippets or code blocks, only architectural guidance.
+    """
+    provider = request.provider or raw_request.headers.get("x-llm-provider")
+    api_key = request.api_key or raw_request.headers.get("x-api-key")
+    model = request.model or raw_request.headers.get("x-ollama-model")
+
+    prompt = (
+        f"You are an expert AI Principal Software Architect performing automated code review.\n\n"
+        f"**File Path**: `{request.file_path}`\n"
+        f"**Rule Violation**: `{request.rule_name}`\n"
+        f"**Issue Description**: {request.message}\n"
+        f"**Code Context**:\n```\n{request.code_snippet or 'N/A'}\n```\n\n"
+        f"EXPLICIT INSTRUCTION: Do NOT write code or modify files. "
+        f"Provide ONLY a clear, concise bulleted text solution explaining to the developer HOW to fix this violation in their code."
+    )
+
+    try:
+        fix_solution = await ai_client.generate_pr_review(
+            diffs=prompt,
+            violations=[request.message],
+            related_incidents=[],
+            score=80.0,
+            provider=provider,
+            api_key=api_key,
+            model=model
+        )
+        return {"fix_suggestion": fix_solution}
+    except Exception as e:
+        logger.error(f"Failed to generate AI fix suggestion: {e}")
+        return {
+            "fix_suggestion": f"⚠️ **AI Suggestion Generation Timed Out / Failed**: {str(e)}\n\n**Architectural Guidance**: Extract database or repository calls outside loop blocks and perform bulk batch operations before iterating."
+        }

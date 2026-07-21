@@ -120,7 +120,8 @@ class RuleEngine:
                 severity="CRITICAL",
                 file_path=cycle[0],
                 line=1,
-                message=f"Circular dependency path detected: {' -> '.join(cycle)}"
+                message=f"Circular dependency path detected: {' -> '.join(cycle)}",
+                suggested_fix="Refactor shared dependencies into a separate common module or inject interfaces to break the circular import cycle."
             ))
 
         # Check layer violations per edge
@@ -137,7 +138,8 @@ class RuleEngine:
                     severity="CRITICAL",
                     file_path=edge.source,
                     line=1,
-                    message=f"Layer violation: Module '{edge.source}' ({src_layer}) imports '{edge.target}' ({tgt_layer}) directly, violating architectural boundaries."
+                    message=f"Layer violation: Module '{edge.source}' ({src_layer}) imports '{edge.target}' ({tgt_layer}) directly, violating architectural boundaries.",
+                    suggested_fix=f"Remove direct import of {tgt_layer} from {src_layer}. Route requests through the intermediate Service layer to preserve strict layer isolation."
                 ))
 
         if len(violations) == 0:
@@ -152,21 +154,48 @@ class RuleEngine:
         parser_lang: Optional[tree_sitter.Language]
     ) -> List[RuleViolation]:
         """Parses file contents to run AST-level performance and safety checkers (uses Tree-sitter or AI fallback)."""
-        # If parser_lang is not available, delegate to AI-Driven Inspector
+        # If parser_lang is not available (e.g. Dart, Java, Go, Kotlin, Swift, C#), run high-speed pattern scanner (0ms)
         if not parser_lang:
-            logger.info(f"RuleEngine: No AST parser for language '{language}'. Delegating to AI-Driven Inspector...")
-            ai_violations = await ai_client.scan_file_ast_rules(file_path, content)
-            violations = []
-            for v in (ai_violations or []):
-                violations.append(RuleViolation(
-                    rule_name=v.get("rule_name", "AI Rule Check"),
-                    severity=v.get("severity", "MEDIUM"),
-                    file_path=file_path,
-                    line=v.get("line", 1),
-                    message=v.get("message", "AI flagged architectural concern.")
-                ))
+            logger.info(f"RuleEngine: Running high-speed pattern scanner for '{file_path}' (Language: {language})")
+            violations: List[RuleViolation] = []
+            lines = content.splitlines()
+            in_loop = False
+            in_async = False
+            
+            db_patterns = ("db.", "query", "execute", "repo.", "repository.", "fetch(", "http.", "find", "save", "insert", "update", "select")
+            blocking_patterns = ("sleep(", "Thread.sleep", "Sync(", "readFileSync", "delay(")
+
+            for idx, line in enumerate(lines, 1):
+                clean_line = line.strip()
+                if any(k in clean_line for k in ("for (", "for(", "for ", "while (", "while(", "forEach(", ".map(")):
+                    in_loop = True
+                if any(k in clean_line for k in ("async", "Future<", "Task<", "Promise<")):
+                    in_async = True
+
+                # Rule A: N+1 Query Detector in Loops
+                if in_loop and any(pat in clean_line.lower() for pat in db_patterns):
+                    violations.append(RuleViolation(
+                        rule_name="N+1 Query Detector",
+                        severity="HIGH",
+                        file_path=file_path,
+                        line=idx,
+                        message=f"Performance bottleneck: Potential query/HTTP operation inside loop: '{clean_line[:70]}'",
+                        suggested_fix="Extract operation outside loop block and batch fetch/save requests."
+                    ))
+
+                # Rule B: Blocking Async Scope
+                if in_async and any(pat in clean_line for pat in blocking_patterns):
+                    violations.append(RuleViolation(
+                        rule_name="Blocking Async Scope",
+                        severity="MEDIUM",
+                        file_path=file_path,
+                        line=idx,
+                        message=f"Concurrency issue: Synchronous blocking operation inside async scope: '{clean_line[:70]}'",
+                        suggested_fix="Replace blocking call with non-blocking async counterpart (e.g. Future.delayed, await)."
+                    ))
+
             if len(violations) == 0:
-                logger.info(f"RuleEngine: AI rule checks completed successfully for '{file_path}'. No violations found.")
+                logger.info(f"RuleEngine: Pattern checks completed successfully for '{file_path}'. No violations found.")
             return violations
 
         logger.info(f"RuleEngine: Checking AST rules for '{file_path}' (Language: {language})")
@@ -222,7 +251,8 @@ class RuleEngine:
                                 severity="HIGH",
                                 file_path=file_path,
                                 line=node.start_point[0] + 1,
-                                message=f"Performance bottleneck: Database or Repository operation '{call_text}' called inside a loop block."
+                                message=f"Performance bottleneck: Database or Repository operation '{call_text}' called inside a loop block.",
+                                suggested_fix=f"Extract '{call_text}' outside the loop block. Collect IDs and use bulk fetch/batch operations before iterating."
                             ))
 
                     # Rule B: Blocking Sync calls in Async Contexts
@@ -235,7 +265,8 @@ class RuleEngine:
                                     severity="MEDIUM",
                                     file_path=file_path,
                                     line=node.start_point[0] + 1,
-                                    message=f"Concurrency issue: Synchronous blocking call '{call_text}' executed inside an async scope."
+                                    message=f"Concurrency issue: Synchronous blocking call '{call_text}' executed inside an async scope.",
+                                    suggested_fix=f"Replace synchronous call '{call_text}' with its non-blocking async counterpart (e.g. asyncio.sleep, httpx.AsyncClient)."
                                 ))
                         else:  # JS/TS
                             if any(pat in call_text for pat in blocking_patterns_ts):
@@ -245,7 +276,8 @@ class RuleEngine:
                                     severity="MEDIUM",
                                     file_path=file_path,
                                     line=node.start_point[0] + 1,
-                                    message=f"Concurrency issue: Synchronous blocking filesystem/shell call '{call_text}' executed inside an async scope."
+                                    message=f"Concurrency issue: Synchronous blocking filesystem/shell call '{call_text}' executed inside an async scope.",
+                                    suggested_fix=f"Replace synchronous blocking call '{call_text}' with its non-blocking async counterpart (e.g. fs.promises.readFile, execa)."
                                 ))
 
             # Recursively traverse children

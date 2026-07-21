@@ -103,7 +103,7 @@ class AIClient:
             response = await client.post(
                 gen_url,
                 json=payload,
-                timeout=180.0
+                timeout=300.0
             )
             
             if response.status_code == 200:
@@ -225,7 +225,8 @@ class AIClient:
             "    \"rule_name\": \"N+1 Query Detector\" or \"Blocking Async Scope\",\n"
             "    \"severity\": \"HIGH\" or \"MEDIUM\",\n"
             "    \"line\": <line_number_integer>,\n"
-            "    \"message\": \"<description of what was called and why it is a violation>\"\n"
+            "    \"message\": \"<description of what was called and why it is a violation>\",\n"
+            "    \"suggested_fix\": \"<actionable AI refactoring advice explaining step-by-step how to fix this violation in this code>\"\n"
             "  }\n"
             "]"
         )
@@ -263,6 +264,38 @@ class AIClient:
         except Exception as e:
             logger.warning(f"Ollama AI scan skipped for '{file_path}' (AI service offline or timed out): {e}")
             return []
+
+    async def generate_violation_fix_suggestion(
+        self,
+        rule_name: str,
+        message: str,
+        file_path: str,
+        code_snippet: Optional[str] = None
+    ) -> str:
+        """
+        Uses AI to generate a precise, custom refactoring code fix for any architectural violation.
+        """
+        system_prompt = (
+            "You are an expert AI Principal Software Architect. Your task is to provide a concise, actionable 2-3 sentence refactoring solution "
+            "for an architectural code violation found during static analysis."
+        )
+        user_prompt = (
+            f"Rule Violation: {rule_name}\n"
+            f"File: {file_path}\n"
+            f"Issue Message: {message}\n"
+            f"Code Snippet:\n```\n{code_snippet or 'N/A'}\n```\n\n"
+            "Provide the recommended refactoring fix:"
+        )
+
+        try:
+            return await self.generate_pr_review(
+                diffs=user_prompt,
+                violations=[message],
+                related_incidents=[],
+                score=90.0
+            )
+        except Exception:
+            return f"Refactor '{file_path}' to resolve {rule_name}: extract database loops into batch calls or replace blocking calls with async alternatives."
 
 
 # Singleton instance
