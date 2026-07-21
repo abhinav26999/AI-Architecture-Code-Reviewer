@@ -8,6 +8,7 @@ class RuleViolation(BaseModel):
     file_path: str
     line: int
     message: str
+    suggested_fix: Optional[str] = None
 
 
 class ArchitectureReviewResponse(BaseModel):

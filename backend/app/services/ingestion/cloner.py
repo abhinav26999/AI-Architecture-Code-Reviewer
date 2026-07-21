@@ -248,6 +248,10 @@ class RepositoryCloner:
             except Exception as e:
                 logger.error(f"Failed to cleanup clone path {clone_path}: {e}")
 
+    def cleanup(self, clone_path: str):
+        """Alias for cleanup_clone."""
+        self.cleanup_clone(clone_path)
+
 
 # Singleton instance
 repo_cloner = RepositoryCloner()

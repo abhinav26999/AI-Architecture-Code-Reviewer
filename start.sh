@@ -2,7 +2,7 @@
 # Navigate to the root directory
 cd "$(dirname "$0")"
 
-echo "=== Starting AI Architecture Reviewer Backend ==="
+echo "=== Starting AI Architecture Reviewer Application ==="
 
 # Check if virtual environment exists
 if [ -f "backend/venv/bin/activate" ]; then
@@ -13,47 +13,38 @@ else
     exit 1
 fi
 
-# Check if server is already running according to PID file
-if [ -f "backend/server.pid" ]; then
-    PID=$(cat backend/server.pid)
-    if ps -p $PID > /dev/null; then
-        echo "FastAPI backend is already running with PID $PID."
-        BACKEND_RUNNING=true
-    else
-        rm backend/server.pid
-    fi
+# Clean up stale processes on ports 8000 and 3000 before starting
+STALE_8000=$(lsof -t -i :8000 2>/dev/null)
+if [ -n "$STALE_8000" ]; then
+    echo "Cleaning up stale process on port 8000 ($STALE_8000)..."
+    kill -9 $STALE_8000 2>/dev/null || true
+    rm -f backend/server.pid
 fi
 
-if [ "$BACKEND_RUNNING" != true ]; then
-    # Start uvicorn in the background from the backend directory
-    cd backend
-    nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload > uvicorn.log 2>&1 &
-    SERVER_PID=$!
-    echo $SERVER_PID > server.pid
-    cd ..
-    echo "Backend started successfully (PID: $SERVER_PID)!"
+STALE_3000=$(lsof -t -i :3000 2>/dev/null)
+if [ -n "$STALE_3000" ]; then
+    echo "Cleaning up stale process on port 3000 ($STALE_3000)..."
+    kill -9 $STALE_3000 2>/dev/null || true
+    rm -f frontend/server.pid
 fi
+
+# 1. Start FastAPI Backend
+echo "--> Starting Backend (FastAPI)..."
+cd backend
+nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload > uvicorn.log 2>&1 &
+SERVER_PID=$!
+echo $SERVER_PID > server.pid
+cd ..
+echo "Backend started successfully (PID: $SERVER_PID)!"
 
 # 2. Start Next.js Frontend
 echo "--> Starting Frontend (Next.js)..."
-if [ -f "frontend/server.pid" ]; then
-    PID=$(cat frontend/server.pid)
-    if ps -p $PID > /dev/null; then
-        echo "Next.js frontend is already running with PID $PID."
-        FRONTEND_RUNNING=true
-    else
-        rm frontend/server.pid
-    fi
-fi
-
-if [ "$FRONTEND_RUNNING" != true ]; then
-    cd frontend
-    nohup npm run dev > next_dev.log 2>&1 &
-    FRONTEND_PID=$!
-    echo $FRONTEND_PID > server.pid
-    cd ..
-    echo "Frontend started successfully (PID: $FRONTEND_PID)!"
-fi
+cd frontend
+nohup npm run dev > next_dev.log 2>&1 &
+FRONTEND_PID=$!
+echo $FRONTEND_PID > server.pid
+cd ..
+echo "Frontend started successfully (PID: $FRONTEND_PID)!"
 
 echo "======================================================"
 echo "All services started successfully!"

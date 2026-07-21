@@ -30,10 +30,12 @@ interface Violation {
   rule_name: string;
   severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
   message: string;
+  suggested_fix?: string;
   code_snippet?: string;
 }
 
 interface Repository {
+  id?: number;
   name: string;
   full_name: string;
   owner: { login: string };
@@ -85,6 +87,10 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [currentSettings, setCurrentSettings] = useState<AppSettings>(loadSettings());
 
+  // AI Refactoring Fix State
+  const [isGeneratingAiFix, setIsGeneratingAiFix] = useState<boolean>(false);
+  const [aiFixText, setAiFixText] = useState<string>("");
+
   // Private Repo Authorization Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalDetails, setAuthModalDetails] = useState<{ platform: string; owner: string; repo: string }>({
@@ -105,9 +111,22 @@ export default function Home() {
     if (scanMode === "public" && publicRepoUrl.trim()) {
       fetchUrl = `http://localhost:8000/api/v1/github/public-pulls?repo_url=${encodeURIComponent(publicRepoUrl.trim())}`;
     } else if (selectedRepo) {
-      const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
-      const repo = scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
-      fetchUrl = `http://localhost:8000/api/v1/github/repos/${owner}/${repo}/pulls`;
+      let owner = "";
+      let repo = selectedRepo;
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        repo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          repo = target.name;
+        }
+      }
+      if (owner && repo) {
+        fetchUrl = `http://localhost:8000/api/v1/github/repos/${owner}/${repo}/pulls`;
+      }
     }
 
     if (!fetchUrl) {
@@ -127,7 +146,7 @@ export default function Home() {
       })
       .catch(err => console.error("Failed to load PRs:", err))
       .finally(() => setIsLoadingPRs(false));
-  }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName]);
+  }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName, repositories]);
 
   // Load Repositories from backend
   useEffect(() => {
@@ -142,7 +161,7 @@ export default function Home() {
       .then((data) => {
         setRepositories(data);
         if (data.length > 0) {
-          setSelectedRepo(data[0].name);
+          setSelectedRepo(data[0].full_name || data[0].name);
         }
       })
       .catch((err) => {
@@ -155,9 +174,23 @@ export default function Home() {
   const runAnalysis = async () => {
     setIsLoading(true);
     try {
+      let owner = "";
+      let repo = selectedRepo;
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        repo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          repo = target.name;
+        }
+      }
+
       const payload = {
-        owner: "abhinav26999",
-        repo: selectedRepo,
+        owner: owner,
+        repo: repo,
         installation_id: null
       };
 
@@ -257,17 +290,34 @@ export default function Home() {
 
   // Run AI PR Review (Stage 6)
   const triggerPRReview = async () => {
-    const targetRepo = scanMode === "github" ? selectedRepo : scannedRepoName ? scannedRepoName.split("/")[1] : selectedRepo;
+    let owner = "";
+    let targetRepo = "";
 
-    if (!targetRepo) {
+    if (scanMode === "public" && scannedRepoName && scannedRepoName.includes("/")) {
+      const parts = scannedRepoName.split("/");
+      owner = parts[0];
+      targetRepo = parts[1];
+    } else if (selectedRepo) {
+      if (selectedRepo.includes("/")) {
+        const parts = selectedRepo.split("/");
+        owner = parts[0];
+        targetRepo = parts[1];
+      } else {
+        const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+        if (target) {
+          owner = target.owner?.login || target.full_name.split("/")[0];
+          targetRepo = target.name;
+        }
+      }
+    }
+
+    if (!targetRepo || !owner) {
       setAiReview("Please select a repository from the 'GitHub App Repos' tab or run a Quick Scan first.");
       return;
     }
 
     setIsReviewing(true);
     setAiReview("");
-
-    const owner = scannedRepoName ? scannedRepoName.split("/")[0] : "abhinav26999";
 
     try {
       const payload = {
@@ -295,6 +345,34 @@ export default function Home() {
       setAiReview(`PR Review Error: ${e.message || "Error connecting to backend API."}`);
     } finally {
       setIsReviewing(false);
+    }
+  };
+
+  // Generate AI Refactoring Fix for selected violation
+  const triggerAiFix = async (v: Violation) => {
+    setIsGeneratingAiFix(true);
+    setAiFixText("");
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/review/fix-suggestion", {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          rule_name: v.rule_name,
+          message: v.message,
+          file_path: v.file_path,
+          code_snippet: v.code_snippet || ""
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAiFixText(data.fix_suggestion || "No fix generated.");
+      } else {
+        setAiFixText("Failed to generate AI refactoring fix.");
+      }
+    } catch (e) {
+      setAiFixText("Error connecting to AI service.");
+    } finally {
+      setIsGeneratingAiFix(false);
     }
   };
 
@@ -468,7 +546,7 @@ export default function Home() {
                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                 >
                   {repositories.map((repo) => (
-                    <option key={repo.name} value={repo.name}>
+                    <option key={repo.full_name || repo.name} value={repo.full_name || repo.name}>
                       {repo.full_name || repo.name}
                     </option>
                   ))}
@@ -620,15 +698,50 @@ export default function Home() {
 
                       <div>
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Location</div>
-                        <div className="text-xs font-mono text-indigo-600 mt-1 bg-indigo-50 px-2 py-1 rounded border border-indigo-200">
+                        <div className="text-xs font-mono text-indigo-600 mt-1 bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-indigo-200 break-all inline-block max-w-full">
                           {selectedViolation.file_path}:{selectedViolation.line}
                         </div>
                       </div>
 
                       <div>
-                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Description</div>
-                        <p className="text-xs text-slate-700 mt-1 leading-relaxed">{selectedViolation.message}</p>
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Description & Verdict</div>
+                        <p className="text-xs text-slate-700 mt-1 leading-relaxed break-words">{selectedViolation.message}</p>
                       </div>
+
+                      {selectedViolation.suggested_fix && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                          <div className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
+                            <span>💡 Recommended Refactoring Fix</span>
+                          </div>
+                          <p className="text-xs text-emerald-900 leading-relaxed font-medium break-words">
+                            {selectedViolation.suggested_fix}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* AI REFACTORING CODE FIX GENERATOR */}
+                      <div className="pt-2">
+                        <button
+                          onClick={() => triggerAiFix(selectedViolation)}
+                          disabled={isGeneratingAiFix}
+                          className="w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm disabled:opacity-50 transition"
+                        >
+                          <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAiFix ? "animate-spin" : ""}`} />
+                          <span>{isGeneratingAiFix ? "AI Architect Generating Suggestions..." : "🤖 Generate AI Refactoring Suggestion"}</span>
+                        </button>
+                      </div>
+
+                      {aiFixText && (
+                        <div className="p-4 bg-slate-900 text-slate-100 rounded-xl space-y-2 border border-slate-800">
+                          <div className="text-xs font-bold text-indigo-400 flex items-center gap-1.5 border-b border-slate-800 pb-2">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>AI Architect Refactoring Guidance</span>
+                          </div>
+                          <div className="prose prose-invert prose-xs max-w-none text-xs text-slate-200 whitespace-pre-wrap leading-relaxed break-words">
+                            {aiFixText}
+                          </div>
+                        </div>
+                      )}
 
                       {selectedViolation.code_snippet && (
                         <div>

@@ -32,16 +32,14 @@ class Settings(BaseSettings):
     OLLAMA_GEN_URL: str = "http://localhost:11434/api/generate"
     @property
     def resolved_temp_clone_dir(self) -> str:
-        """Returns the absolute path of the clone directory, resolved relative to backend root if relative."""
+        """Returns system temp directory for clones so Uvicorn dev-reloader doesn't restart during scanning."""
+        import tempfile
         if not self.TEMP_CLONE_DIR:
-            # Default to backend/temp_clones
-            backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            path = os.path.join(backend_dir, "temp_clones")
+            path = os.path.join(tempfile.gettempdir(), "ai_code_reviewer_clones")
         else:
             path = self.TEMP_CLONE_DIR
             if not os.path.isabs(path):
-                backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                path = os.path.join(backend_dir, path)
+                path = os.path.join(tempfile.gettempdir(), path)
         return os.path.abspath(path)
 
     model_config = SettingsConfigDict(
