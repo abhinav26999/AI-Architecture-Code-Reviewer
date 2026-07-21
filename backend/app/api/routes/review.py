@@ -38,27 +38,28 @@ SUPPORTED_EXTENSIONS = {
 
 
 @router.post("/analyze", response_model=ArchitectureReviewResponse)
-async def analyze_codebase(request: ParseRepoRequest):
+async def analyze_codebase(request: ParseRepoRequest, raw_request: Request):
     """
     Performs a deterministic architectural review of the codebase.
     Clones the repository, parses it to extract imports and AST trees,
     computes the dependency graph, executes rule validations (N+1 queries,
     layer boundaries, blocking loops), cleans up cloned files, and returns results.
     """
-    try:
-        inst_id = await get_effective_installation_id(request.installation_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not resolve active installation ID: {str(e)}"
-        )
+    github_token = raw_request.headers.get("x-github-token")
+    inst_id = None
+    if not github_token:
+        try:
+            inst_id = await get_effective_installation_id(request.installation_id)
+        except Exception:
+            pass  # Fallback to token or public clone
 
     # 1. Clone repository
     try:
         clone_path = await repo_cloner.clone_repository(
             owner=request.owner,
             repo=request.repo,
-            installation_id=inst_id
+            installation_id=inst_id,
+            github_token=github_token
         )
     except ClonerError as e:
         raise HTTPException(status_code=500, detail=f"Repository ingestion failed: {str(e)}")
@@ -110,8 +111,11 @@ async def analyze_codebase(request: ParseRepoRequest):
         repo_cloner.cleanup_clone(clone_path)
 
 
+from fastapi import APIRouter, HTTPException, Request
+
+# ... inside analyze_and_review_pr:
 @router.post("/pr")
-async def analyze_and_review_pr(request: PRReviewRequest):
+async def analyze_and_review_pr(request: PRReviewRequest, raw_request: Request):
     """
     Automated PR review pipeline.
     Fetches the pull request file changes/diffs from GitHub,
@@ -119,6 +123,14 @@ async def analyze_and_review_pr(request: PRReviewRequest):
     checks rule validations, queries pgvector RAG for historical outages,
     sends context to LLM reasoning, and posts the review comment to the PR.
     """
+    # Extract optional dynamic LLM headers
+    llm_provider = raw_request.headers.get("x-llm-provider")
+    openai_key = raw_request.headers.get("x-openai-key")
+    gemini_key = raw_request.headers.get("x-gemini-key")
+    ollama_model = raw_request.headers.get("x-ollama-model")
+    ollama_url = raw_request.headers.get("x-ollama-url")
+    
+    api_key = openai_key if llm_provider == "openai" else (gemini_key if llm_provider == "gemini" else None)
     try:
         inst_id = await get_effective_installation_id(request.installation_id)
     except Exception as e:
@@ -222,7 +234,11 @@ async def analyze_and_review_pr(request: PRReviewRequest):
             diffs=diffs_str,
             violations=violations_messages,
             related_incidents=incidents_found,
-            score=review_results.score
+            score=review_results.score,
+            provider=llm_provider,
+            api_key=api_key,
+            model=ollama_model if llm_provider == "ollama" else None,
+            ollama_url=ollama_url
         )
 
         # 8. Post review comment to GitHub PR
@@ -256,14 +272,23 @@ async def analyze_and_review_pr(request: PRReviewRequest):
 
 
 @router.post("/scan-public", response_model=ArchitectureReviewResponse)
-async def scan_public_repository(request: PublicScanRequest):
+async def scan_public_repository(request: PublicScanRequest, raw_request: Request):
     """
-    Scans any public GitHub repository by URL. No authentication required.
-    Clones the repo, parses files, builds graph, runs Rule Engine, and returns the review.
+    Scans any public or private Git repository (GitHub, GitLab, Bitbucket) by URL.
+    Clones the repo using provided PATs if private, parses files, builds graph, runs Rule Engine, and returns the review.
     """
-    # 1. Clone public repository
+    github_token = raw_request.headers.get("x-github-token")
+    gitlab_token = raw_request.headers.get("x-gitlab-token")
+    bitbucket_token = raw_request.headers.get("x-bitbucket-token")
+
+    # 1. Clone repository
     try:
-        clone_path, owner, repo = await repo_cloner.clone_public_repository(request.repo_url)
+        clone_path, owner, repo = await repo_cloner.clone_public_repository(
+            repo_url=request.repo_url,
+            github_token=github_token,
+            gitlab_token=gitlab_token,
+            bitbucket_token=bitbucket_token
+        )
     except ClonerError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

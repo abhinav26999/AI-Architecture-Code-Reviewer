@@ -17,27 +17,31 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 
 
+from fastapi import APIRouter, HTTPException, Request
+
+# ...
 @router.post("/analyze-repo", response_model=DependencyGraphResponse)
-async def analyze_repo(request: ParseRepoRequest):
+async def analyze_repo(request: ParseRepoRequest, raw_request: Request):
     """
     Shallow clones the repository, parses its codebase files,
     constructs the directed dependency graph, calculates instability/coupling metrics,
     finds circular dependency loops, and cleans up the cloned repository folder.
     """
-    try:
-        inst_id = await get_effective_installation_id(request.installation_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not resolve active installation ID: {str(e)}"
-        )
+    github_token = raw_request.headers.get("x-github-token")
+    inst_id = None
+    if not github_token:
+        try:
+            inst_id = await get_effective_installation_id(request.installation_id)
+        except Exception:
+            pass  # Fallback to PAT or public URL clone
 
     # 1. Clone repository
     try:
         clone_path = await repo_cloner.clone_repository(
             owner=request.owner,
             repo=request.repo,
-            installation_id=inst_id
+            installation_id=inst_id,
+            github_token=github_token
         )
     except ClonerError as e:
         raise HTTPException(status_code=500, detail=f"Repository ingestion failed: {str(e)}")
@@ -86,14 +90,22 @@ class PublicScanRequest(BaseModel):
 
 
 @router.post("/scan-public", response_model=DependencyGraphResponse)
-async def scan_public_graph(request: PublicScanRequest):
+async def scan_public_graph(request: PublicScanRequest, raw_request: Request):
     """
-    Analyzes the dependency graph of any public GitHub repository by URL.
-    No authentication required.
+    Analyzes the dependency graph of any public or private Git repository (GitHub, GitLab, Bitbucket) by URL.
     """
-    # 1. Clone public repository
+    github_token = raw_request.headers.get("x-github-token")
+    gitlab_token = raw_request.headers.get("x-gitlab-token")
+    bitbucket_token = raw_request.headers.get("x-bitbucket-token")
+
+    # 1. Clone repository
     try:
-        clone_path, owner, repo = await repo_cloner.clone_public_repository(request.repo_url)
+        clone_path, owner, repo = await repo_cloner.clone_public_repository(
+            repo_url=request.repo_url,
+            github_token=github_token,
+            gitlab_token=gitlab_token,
+            bitbucket_token=bitbucket_token
+        )
     except ClonerError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
