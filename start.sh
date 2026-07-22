@@ -37,7 +37,16 @@ echo $SERVER_PID > server.pid
 cd ..
 echo "Backend started successfully (PID: $SERVER_PID)!"
 
-# 2. Start Next.js Frontend
+# 2. Start Celery Worker
+echo "--> Starting Celery Worker..."
+cd backend
+nohup celery -A app.worker.celery_app worker --loglevel=info > celery.log 2>&1 &
+CELERY_PID=$!
+echo $CELERY_PID > celery.pid
+cd ..
+echo "Celery worker started successfully (PID: $CELERY_PID)!"
+
+# 3. Start Next.js Frontend
 echo "--> Starting Frontend (Next.js)..."
 cd frontend
 nohup npm run dev > next_dev.log 2>&1 &

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "ollama"
     OLLAMA_GEN_MODEL: str = "llama3"
     OLLAMA_GEN_URL: str = "http://localhost:11434/api/generate"
+
+    # Redis/Celery settings
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     @property
     def resolved_temp_clone_dir(self) -> str:
         """Returns system temp directory for clones so Uvicorn dev-reloader doesn't restart during scanning."""

@@ -9,6 +9,7 @@ class RuleViolation(BaseModel):
     line: int
     message: str
     suggested_fix: Optional[str] = None
+    code_snippet: Optional[str] = None
 
 
 class ArchitectureReviewResponse(BaseModel):

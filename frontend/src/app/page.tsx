@@ -90,6 +90,7 @@ export default function Home() {
   // AI Refactoring Fix State
   const [isGeneratingAiFix, setIsGeneratingAiFix] = useState<boolean>(false);
   const [aiFixText, setAiFixText] = useState<string>("");
+  const [taskStatusMsg, setTaskStatusMsg] = useState<string>("");
 
   // Ref for auto-scrolling inspector into view when a violation is selected
   const inspectorRef = useRef<HTMLDivElement>(null);
@@ -179,9 +180,49 @@ export default function Home() {
       .finally(() => setIsFetchingRepos(false));
   }, []);
 
-  // Run Codebase Analysis (Stage 1-4)
+  // Helper to poll background Celery tasks
+  const pollTaskStatus = (
+    taskId: string,
+    onSuccess: (result: any) => void,
+    onError: (err: string) => void,
+    onProgress: (status: string) => void
+  ) => {
+    setTaskStatusMsg("Enqueued. Waiting for background worker...");
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/v1/review/task-status/${taskId}`);
+        if (!response.ok) {
+          throw new Error(`Failed to check task status. Server returned ${response.status}`);
+        }
+        const data = await response.json();
+        
+        if (data.status === "PENDING") {
+          onProgress("Enqueued. Waiting for background worker...");
+        } else if (data.status === "STARTED") {
+          onProgress("Cloning repository and running AST audits...");
+        } else if (data.status === "SUCCESS") {
+          clearInterval(interval);
+          if (data.result && data.result.status === "error") {
+            onError(data.result.error);
+          } else {
+            onSuccess(data.result);
+          }
+        } else if (data.status === "FAILURE") {
+          clearInterval(interval);
+          onError(data.error || "Background task execution failed.");
+        }
+      } catch (e: any) {
+        clearInterval(interval);
+        onError(e.message || "Error polling task status.");
+      }
+    }, 1200);
+    return interval;
+  };
+
+  // Run Codebase Analysis (Stage 1-4) using Celery background queue
   const runAnalysis = async () => {
     setIsLoading(true);
+    setTaskStatusMsg("Contacting server...");
     try {
       let owner = "";
       let repo = selectedRepo;
@@ -203,40 +244,50 @@ export default function Home() {
         installation_id: null
       };
 
-      const customHeaders = getApiHeaders();
+      const res = await fetch("http://localhost:8000/api/v1/review/analyze-async", {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify(payload)
+      });
 
-      const [reviewRes, graphRes] = await Promise.all([
-        fetch("http://localhost:8000/api/v1/review/analyze", {
-          method: "POST",
-          headers: customHeaders,
-          body: JSON.stringify(payload)
-        }),
-        fetch("http://localhost:8000/api/v1/graph/analyze-repo", {
-          method: "POST",
-          headers: customHeaders,
-          body: JSON.stringify(payload)
-        })
-      ]);
-
-      const reviewData = await reviewRes.json();
-      const graphDataJson = await graphRes.json();
-
-      setScore(reviewData.score || 100);
-      setViolations(reviewData.violations || []);
-      setGraphData(graphDataJson);
-
-      if (reviewData.score === 100) {
-        confetti({ particleCount: 150, spread: 80, colors: ["#10b981", "#3b82f6"] });
+      if (!res.ok) {
+        throw new Error("Failed to queue analysis task.");
       }
+
+      const taskData = await res.json();
+      const taskId = taskData.task_id;
+
+      pollTaskStatus(
+        taskId,
+        (result) => {
+          setScore(result.score || 100);
+          setViolations(result.violations || []);
+          setGraphData(result.graph);
+          setIsLoading(false);
+          setTaskStatusMsg("");
+          if (result.score === 100) {
+            confetti({ particleCount: 150, spread: 80, colors: ["#10b981", "#3b82f6"] });
+          }
+        },
+        (err) => {
+          console.error(err);
+          alert(`Analysis failed: ${err}`);
+          setIsLoading(false);
+          setTaskStatusMsg("");
+        },
+        (status) => {
+          setTaskStatusMsg(status);
+        }
+      );
     } catch (e) {
       console.error(e);
-      alert("Backend API is unreachable. Verify FastAPI server is running on port 8000.");
-    } finally {
+      alert("Backend API is unreachable. Verify FastAPI server is running.");
       setIsLoading(false);
+      setTaskStatusMsg("");
     }
   };
 
-  // Run Public Repo Scan
+  // Run Public Repo Scan using Celery background queue
   const runPublicScan = async () => {
     if (!publicRepoUrl.trim()) {
       setScanError("Please paste a GitHub repository URL.");
@@ -245,55 +296,61 @@ export default function Home() {
     setScanError("");
     setIsLoading(true);
     setScannedRepoName("");
+    setTaskStatusMsg("Contacting server...");
+
     try {
       const payload = { repo_url: publicRepoUrl.trim() };
-      const customHeaders = getApiHeaders();
 
-      const [reviewRes, graphRes] = await Promise.all([
-        fetch("http://localhost:8000/api/v1/review/scan-public", {
-          method: "POST",
-          headers: customHeaders,
-          body: JSON.stringify(payload)
-        }),
-        fetch("http://localhost:8000/api/v1/graph/scan-public", {
-          method: "POST",
-          headers: customHeaders,
-          body: JSON.stringify(payload)
-        })
-      ]);
+      const res = await fetch("http://localhost:8000/api/v1/review/scan-public-async", {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify(payload)
+      });
 
-      if (!reviewRes.ok) {
-        const errData = await reviewRes.json().catch(() => ({}));
-        const detail = errData.detail || "";
-        if (detail.includes("PRIVATE_REPO_AUTH_REQUIRED")) {
-          const parts = detail.split(":");
-          const host = parts[1] || "github.com";
-          const owner = parts[2] || "";
-          const repo = parts[3] || "";
-          setAuthModalDetails({ platform: host, owner, repo });
-          setIsAuthModalOpen(true);
+      if (!res.ok) {
+        throw new Error("Failed to queue public scan task.");
+      }
+
+      const taskData = await res.json();
+      const taskId = taskData.task_id;
+
+      pollTaskStatus(
+        taskId,
+        (result) => {
+          setScore(result.score || 100);
+          setViolations(result.violations || []);
+          setGraphData(result.graph);
+          setScannedRepoName(`${result.owner}/${result.repo}`);
           setIsLoading(false);
-          return;
+          setTaskStatusMsg("");
+          if (result.score === 100) {
+            confetti({ particleCount: 150, spread: 80, colors: ["#10b981", "#3b82f6"] });
+          }
+        },
+        (err) => {
+          console.error(err);
+          if (err.includes("PRIVATE_REPO_AUTH_REQUIRED")) {
+            const parts = err.split(":");
+            const host = parts[1] || "github.com";
+            const owner = parts[2] || "";
+            const repo = parts[3] || "";
+            setAuthModalDetails({ platform: host, owner, repo });
+            setIsAuthModalOpen(true);
+          } else {
+            setScanError(err || "Failed to scan the repository. Make sure it is a valid Git URL.");
+          }
+          setIsLoading(false);
+          setTaskStatusMsg("");
+        },
+        (status) => {
+          setTaskStatusMsg(status);
         }
-        throw new Error(detail || "Failed to scan repository.");
-      }
-
-      const reviewData = await reviewRes.json();
-      const graphDataJson = await graphRes.json();
-
-      setScore(reviewData.score || 100);
-      setViolations(reviewData.violations || []);
-      setGraphData(graphDataJson);
-      setScannedRepoName(`${reviewData.owner}/${reviewData.repo}`);
-
-      if (reviewData.score === 100) {
-        confetti({ particleCount: 150, spread: 80, colors: ["#10b981", "#3b82f6"] });
-      }
+      );
     } catch (e: any) {
       console.error(e);
-      setScanError(e.message || "Failed to scan the repository. Make sure it is a valid public GitHub URL.");
-    } finally {
+      setScanError(e.message || "Failed to scan the repository.");
       setIsLoading(false);
+      setTaskStatusMsg("");
     }
   };
 
@@ -327,6 +384,7 @@ export default function Home() {
 
     setIsReviewing(true);
     setAiReview("");
+    setTaskStatusMsg("Queueing PR review task...");
 
     try {
       const payload = {
@@ -336,7 +394,7 @@ export default function Home() {
         installation_id: null
       };
 
-      const response = await fetch("http://localhost:8000/api/v1/review/pr", {
+      const response = await fetch("http://localhost:8000/api/v1/review/pr-async", {
         method: "POST",
         headers: getApiHeaders(),
         body: JSON.stringify(payload)
@@ -347,13 +405,38 @@ export default function Home() {
         throw new Error(errData.detail || `Server returned error ${response.status}`);
       }
 
-      const data = await response.json();
-      setAiReview(data.review_body || "Failed to generate review.");
+      const taskData = await response.json();
+      const taskId = taskData.task_id;
+
+      pollTaskStatus(
+        taskId,
+        (result) => {
+          setAiReview(result.review_body || "PR Audit completed, no critique generated.");
+          // Update violations/score if returned from PR scan
+          if (result.violations) {
+            setViolations(result.violations);
+          }
+          if (result.score !== undefined) {
+            setScore(result.score);
+          }
+          setIsReviewing(false);
+          setTaskStatusMsg("");
+        },
+        (err) => {
+          console.error(err);
+          setAiReview(`PR Review Error: ${err}`);
+          setIsReviewing(false);
+          setTaskStatusMsg("");
+        },
+        (status) => {
+          setTaskStatusMsg(status);
+        }
+      );
     } catch (e: any) {
       console.error(e);
       setAiReview(`PR Review Error: ${e.message || "Error connecting to backend API."}`);
-    } finally {
       setIsReviewing(false);
+      setTaskStatusMsg("");
     }
   };
 
@@ -576,6 +659,17 @@ export default function Home() {
           )}
 
         </div>
+
+        {/* BACKGROUND TASK PROGRESS BANNER */}
+        {(isLoading || isReviewing) && taskStatusMsg && (
+          <div className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 flex items-center space-x-3.5 animate-pulse shadow-sm">
+            <RefreshCw className="w-5 h-5 text-indigo-600 animate-spin flex-shrink-0" />
+            <div>
+              <div className="text-xs font-bold text-indigo-900">Background Job Processing...</div>
+              <div className="text-[11px] text-indigo-700 font-medium mt-0.5">{taskStatusMsg}</div>
+            </div>
+          </div>
+        )}
 
         {/* TABS */}
         <div className="flex border-b border-slate-200 mt-8 space-x-6 text-sm font-bold">
