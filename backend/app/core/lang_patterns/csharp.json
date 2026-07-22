@@ -1,0 +1,23 @@
+{
+  "language": "C#",
+  "extensions": [".cs"],
+  "loop_keywords": ["for (", "for(", "foreach (", "foreach(", "while (", "while(", ".ForEach(", "do {"],
+  "db_patterns": [
+    "_context.SaveChanges(", "_context.SaveChangesAsync(", "context.SaveChanges(",
+    "_context.Add(", "_context.Update(", "_context.Remove(", "_context.Find(",
+    "DbContext.", "dbContext.", "repository.Find", "repository.Save", "repository.Add",
+    "repository.Remove", "repository.Update",
+    "_unitOfWork.", "unitOfWork.", ".ToList(", ".ToListAsync(", ".FirstOrDefault(",
+    ".FindAsync(", ".AddAsync(", ".UpdateAsync(", ".DeleteAsync(",
+    "HttpClient.GetAsync(", "HttpClient.PostAsync(", "HttpClient.PutAsync(", "HttpClient.DeleteAsync(",
+    "client.GetAsync(", "client.PostAsync(", "client.PutAsync(",
+    "SqlCommand(", "SqlDataReader(", "OleDbCommand(", "SqlConnection(",
+    "Dapper.Query(", "Dapper.Execute("
+  ],
+  "blocking_patterns": [
+    "Thread.Sleep(", "Task.Wait(", ".Result", ".GetAwaiter().GetResult()",
+    "Monitor.Enter(", "Mutex.WaitOne(", "ManualResetEvent.WaitOne(",
+    "AutoResetEvent.WaitOne(", "Semaphore.WaitOne("
+  ],
+  "loop_end_keywords": ["}"]
+}

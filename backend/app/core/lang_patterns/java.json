@@ -1,0 +1,22 @@
+{
+  "language": "Java",
+  "extensions": [".java"],
+  "loop_keywords": ["for (", "for(", "while (", "while(", "forEach(", ".stream(", "do {"],
+  "db_patterns": [
+    "repository.find", "repository.save", "repository.delete", "repository.update",
+    "entityManager.find", "entityManager.persist", "entityManager.merge", "entityManager.remove",
+    "session.get", "session.save", "session.delete", "session.update", "session.load",
+    "jdbcTemplate.query", "jdbcTemplate.update", "jdbcTemplate.execute",
+    "namedParameterJdbcTemplate.", "simpleJdbcTemplate.",
+    "em.find(", "em.persist(", "em.merge(", "em.remove(",
+    "restTemplate.getForObject", "restTemplate.postForObject", "restTemplate.exchange",
+    "webClient.get(", "webClient.post(", "webClient.put(", "webClient.delete(",
+    "HttpClient.newHttpClient", "httpClient.send(", "okHttpClient.",
+    ".findById(", ".findAll(", ".save(", ".saveAll(", ".deleteById(", ".existsById("
+  ],
+  "blocking_patterns": [
+    "Thread.sleep(", "Object.wait(", ".join(", "Future.get(", "CountDownLatch.await(",
+    "Semaphore.acquire(", "BlockingQueue.take(", "synchronized ("
+  ],
+  "loop_end_keywords": ["}"]
+}

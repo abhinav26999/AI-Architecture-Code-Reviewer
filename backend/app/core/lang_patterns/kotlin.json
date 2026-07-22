@@ -1,0 +1,20 @@
+{
+  "language": "Kotlin",
+  "extensions": [".kt", ".kts"],
+  "loop_keywords": ["for (", "for(", "while (", "while(", "forEach {", "forEach(", ".map {", ".filter {", "do {"],
+  "db_patterns": [
+    "repository.find", "repository.save", "repository.delete", "repository.update",
+    "entityManager.find", "entityManager.persist", "entityManager.merge",
+    "session.get", "session.save", "session.delete",
+    "jdbcTemplate.query", "jdbcTemplate.update",
+    "retrofit.", "apiService.", "client.get(", "client.post(", "client.put(",
+    "httpClient.get", "httpClient.post",
+    ".findById(", ".findAll(", ".save(", ".saveAll(", ".deleteById(",
+    "supabaseClient.", "firestore.", "Firebase."
+  ],
+  "blocking_patterns": [
+    "Thread.sleep(", "runBlocking {", "runBlocking(", ".join(", "async { }.await()",
+    "Dispatchers.IO", "Thread(", "blocking("
+  ],
+  "loop_end_keywords": ["}"]
+}

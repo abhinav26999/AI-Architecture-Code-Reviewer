@@ -34,6 +34,8 @@ class FixSuggestionRequest(BaseModel):
     rule_name: str
     message: str
     file_path: str
+    severity: Optional[str] = "HIGH"
+    suggested_fix: Optional[str] = None
     code_snippet: Optional[str] = None
     provider: Optional[str] = None
     api_key: Optional[str] = None
@@ -386,14 +388,42 @@ async def generate_ai_fix_suggestion(request: FixSuggestionRequest, raw_request:
     api_key = request.api_key or raw_request.headers.get("x-api-key")
     model = request.model or raw_request.headers.get("x-ollama-model")
 
+    # Determine file language from extension
+    ext = request.file_path.rsplit(".", 1)[-1].lower() if "." in request.file_path else "unknown"
+    lang_map = {
+        "py": "Python", "ts": "TypeScript", "tsx": "TypeScript/React",
+        "js": "JavaScript", "jsx": "JavaScript/React", "dart": "Dart/Flutter",
+        "java": "Java", "kt": "Kotlin", "swift": "Swift", "go": "Go",
+        "rs": "Rust", "cs": "C#", "rb": "Ruby", "php": "PHP", "cpp": "C++", "c": "C",
+    }
+    lang = lang_map.get(ext, ext.upper())
+
     prompt = (
-        f"You are an expert AI Principal Software Architect performing automated code review.\n\n"
-        f"**File Path**: `{request.file_path}`\n"
-        f"**Rule Violation**: `{request.rule_name}`\n"
-        f"**Issue Description**: {request.message}\n"
-        f"**Code Context**:\n```\n{request.code_snippet or 'N/A'}\n```\n\n"
-        f"EXPLICIT INSTRUCTION: Do NOT write code or modify files. "
-        f"Provide ONLY a clear, concise bulleted text solution explaining to the developer HOW to fix this violation in their code."
+        f"You are an expert Principal Software Architect specializing in {lang} architectural best practices.\n"
+        f"A static analysis rule engine detected a violation. Your job is to explain how to fix it.\n\n"
+        f"VIOLATION DETAILS:\n"
+        f"Rule: {request.rule_name}\n"
+        f"Severity: {request.severity or 'HIGH'}\n"
+        f"File: {request.file_path}\n"
+        f"Language: {lang}\n"
+        f"Issue: {request.message}\n"
+        + (f"Hint: {request.suggested_fix}\n" if request.suggested_fix else "")
+        + (f"Code Context:\n{request.code_snippet}\n" if request.code_snippet else "")
+        + f"\n"
+        f"Respond ONLY in the following plain-text format (no markdown, no asterisks, no hash symbols, no backticks):\n\n"
+        f"[ROOT CAUSE]\n"
+        f"Write 1-2 sentences explaining why this pattern is a problem and what it causes at runtime.\n\n"
+        f"[IMPACT]\n"
+        f"Write 1-2 sentences explaining the performance or correctness issue this causes.\n\n"
+        f"[HOW TO FIX]\n"
+        f"Write 3 to 5 numbered steps explaining exactly what the {lang} developer must do to fix this.\n\n"
+        f"[BEST PRACTICE]\n"
+        f"Write 1 sentence summarizing the architectural principle being enforced.\n\n"
+        f"STRICT RULES:\n"
+        f"- Do not use any markdown symbols: no **, no #, no -, no backticks.\n"
+        f"- Use only plain English sentences and numbered lists.\n"
+        f"- Each section must start exactly with its label in square brackets as shown above.\n"
+        f"- Be specific to {lang}.\n"
     )
 
     try:

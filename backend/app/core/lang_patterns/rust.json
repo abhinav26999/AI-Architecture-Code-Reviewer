@@ -1,0 +1,19 @@
+{
+  "language": "Rust",
+  "extensions": [".rs"],
+  "loop_keywords": ["for ", "loop {", "while ", "iter().map(", ".for_each(", ".filter("],
+  "db_patterns": [
+    "sqlx::query", "sqlx::query_as", "sqlx::execute", "sqlx::fetch",
+    "diesel::insert_into", "diesel::update", "diesel::delete", "diesel::select",
+    "conn.execute(", "conn.query(", "conn.fetch(", "conn.prepare(",
+    "client.get(", "client.post(", "client.put(", "client.delete(",
+    "reqwest::get(", "reqwest::Client", "hyper::Client",
+    "repository.find", "repository.save", "repository.delete",
+    ".find_one(", ".find_all(", ".insert(", ".update(", ".delete("
+  ],
+  "blocking_patterns": [
+    "thread::sleep(", "std::thread::sleep(", ".join(", "mutex.lock()",
+    "Arc::new(Mutex::new(", "block_on(", "futures::executor::block_on("
+  ],
+  "loop_end_keywords": ["}"]
+}

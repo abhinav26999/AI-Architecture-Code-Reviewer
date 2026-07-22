@@ -1,0 +1,19 @@
+{
+  "language": "Swift",
+  "extensions": [".swift"],
+  "loop_keywords": ["for ", "while ", "forEach {", "forEach(", ".map {", ".filter {", "repeat {"],
+  "db_patterns": [
+    "context.fetch(", "context.save(", "context.delete(", "context.insert(",
+    "managedObjectContext.", "NSFetchRequest(", "CoreData.", "realm.write {",
+    "realm.add(", "realm.delete(", "realm.objects(",
+    "URLSession.shared.dataTask", "URLSession.shared.data(",
+    "Alamofire.request(", "AF.request(", "AF.upload(", "AF.download(",
+    "apiClient.", "networkService.", "httpClient.", "repository.", "dataSource.",
+    "supabase.", "firebase.", "Firestore.firestore()"
+  ],
+  "blocking_patterns": [
+    "Thread.sleep(", "DispatchSemaphore(", "semaphore.wait(", "CFRunLoopRun(",
+    "RunLoop.main.run(", "Thread(target:", "OperationQueue.main.addOperation("
+  ],
+  "loop_end_keywords": ["}"]
+}

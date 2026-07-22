@@ -1,0 +1,19 @@
+{
+  "language": "Python",
+  "extensions": [".py"],
+  "loop_keywords": ["for ", "for(", "while ", "while(", "[x for", "[x if"],
+  "db_patterns": [
+    "db.query", "db.execute", "db.add", "db.get", "db.delete", "db.update",
+    "session.query", "session.execute", "session.add", "session.get",
+    "cursor.execute", "cursor.fetchone", "cursor.fetchall",
+    "repository.", "repo.", ".find(", ".find_one(", ".find_all(",
+    ".save(", ".insert(", ".update(", ".delete(", ".bulk_create(",
+    "requests.get", "requests.post", "requests.put", "requests.delete",
+    "httpx.get", "httpx.post", "urllib.request", "http.client"
+  ],
+  "blocking_patterns": [
+    "time.sleep(", "os.system(", "subprocess.call(", "subprocess.run(",
+    "input(", "open(", "socket.recv(", "socket.accept("
+  ],
+  "loop_end_keywords": ["}"]
+}

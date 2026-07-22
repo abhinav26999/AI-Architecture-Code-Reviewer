@@ -1,0 +1,32 @@
+{
+  "language": "TypeScript",
+  "extensions": [".ts", ".tsx"],
+  "loop_keywords": [
+    "for (", "for(", "for ", "while (", "while(", "forEach(", "forEach (",
+    ".map(", ".map (", ".filter(", ".reduce(", ".flatMap(", "do {"
+  ],
+  "db_patterns": [
+    "await prisma.", "prisma.",
+    "await typeorm.", "getRepository(", "getManager(",
+    "await mongoose.", "Model.find(", "Model.findOne(", "Model.findById(", "Model.create(", "Model.updateOne(", "Model.deleteOne(",
+    "await sequelize.", "await knex(",
+    "await drizzle.", "db.select(", "db.insert(", "db.update(", "db.delete(", "db.query(",
+    "await supabase.", "supabase.from(",
+    "await firebase.", "firestore.collection(", "getFirestore(",
+    "fetch(", "await fetch(",
+    "axios.get(", "axios.post(", "axios.put(", "axios.delete(", "axios.patch(",
+    "await axios.", "http.get(", "https.get(",
+    "repository.find(", "repository.findOne(", "repository.save(", "repository.create(",
+    "repository.delete(", "repository.update(", "repository.findAndCount(",
+    "dataSource.query(", "em.find(", "em.findOne(", "em.persist(", "em.flush(",
+    "HttpClient", "this.http.get(", "this.http.post(", "this.http.put(", "this.http.delete(",
+    "this.service.", "this.repository.", "this.dataSource.", "this.db."
+  ],
+  "blocking_patterns": [
+    "readFileSync(", "writeFileSync(", "execSync(", "spawnSync(",
+    "fs.readFileSync", "fs.writeFileSync", "fs.existsSync", "fs.readdirSync",
+    "child_process.execSync", "Atomics.wait(",
+    "XMLHttpRequest", ".responseText", ".open(", ".send("
+  ],
+  "loop_end_keywords": ["}"]
+}
