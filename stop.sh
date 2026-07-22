@@ -28,7 +28,25 @@ fi
 pkill -9 -f "uvicorn app.main:app" 2>/dev/null || true
 echo "Backend stopped."
 
-# 2. Stop Frontend
+# 2. Stop Celery Worker
+echo "--> Stopping Celery Worker..."
+if [ -f "backend/celery.pid" ]; then
+    PID=$(cat backend/celery.pid)
+    echo "Stopping Celery worker (PID: $PID)..."
+    kill $PID 2>/dev/null || true
+    sleep 1
+    if ps -p $PID > /dev/null 2>&1; then
+        echo "Celery worker did not shut down. Force killing..."
+        kill -9 $PID 2>/dev/null || true
+    fi
+    rm -f backend/celery.pid
+fi
+
+# Ensure all Celery workers are stopped
+pkill -9 -f "celery -A app.worker.celery_app" 2>/dev/null || true
+echo "Celery worker stopped."
+
+# 3. Stop Frontend
 echo "--> Stopping Frontend (Next.js)..."
 if [ -f "frontend/server.pid" ]; then
     PID=$(cat frontend/server.pid)

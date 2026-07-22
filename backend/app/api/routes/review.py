@@ -442,3 +442,109 @@ async def generate_ai_fix_suggestion(request: FixSuggestionRequest, raw_request:
         return {
             "fix_suggestion": f"⚠️ **AI Suggestion Generation Timed Out / Failed**: {str(e)}\n\n**Architectural Guidance**: Extract database or repository calls outside loop blocks and perform bulk batch operations before iterating."
         }
+
+
+# ==============================================================================
+# Async Background Task Endpoints (Celery + Redis)
+# ==============================================================================
+
+from celery.result import AsyncResult
+from app.worker.celery_app import celery_app
+from app.worker.tasks import analyze_codebase_task, audit_pr_task
+
+@router.post("/analyze-async")
+async def analyze_codebase_async(request: ParseRepoRequest, raw_request: Request):
+    """
+    Triggers codebase analysis in the background using Celery.
+    Returns the task ID immediately.
+    """
+    github_token = raw_request.headers.get("x-github-token")
+    inst_id = None
+    if not github_token:
+        try:
+            inst_id = await get_effective_installation_id(request.installation_id)
+        except Exception:
+            pass
+
+    task = analyze_codebase_task.delay(
+        owner=request.owner,
+        repo=request.repo,
+        installation_id=inst_id,
+        github_token=github_token
+    )
+    return {"status": "accepted", "task_id": task.id}
+
+
+@router.post("/scan-public-async")
+async def scan_public_repository_async(request: PublicScanRequest, raw_request: Request):
+    """
+    Triggers public Git repository scan in the background.
+    Returns the task ID immediately.
+    """
+    github_token = raw_request.headers.get("x-github-token")
+    gitlab_token = raw_request.headers.get("x-gitlab-token")
+    bitbucket_token = raw_request.headers.get("x-bitbucket-token")
+
+    task = analyze_codebase_task.delay(
+        repo_url=request.repo_url,
+        github_token=github_token,
+        gitlab_token=gitlab_token,
+        bitbucket_token=bitbucket_token
+    )
+    return {"status": "accepted", "task_id": task.id}
+
+
+
+@router.post("/pr-async")
+async def analyze_and_review_pr_async(request: PRReviewRequest, raw_request: Request):
+    """
+    Triggers PR review audit in the background using Celery.
+    Returns the task ID immediately.
+    """
+    llm_provider = raw_request.headers.get("x-llm-provider")
+    openai_key = raw_request.headers.get("x-openai-key")
+    gemini_key = raw_request.headers.get("x-gemini-key")
+    ollama_model = raw_request.headers.get("x-ollama-model")
+    ollama_url = raw_request.headers.get("x-ollama-url")
+    
+    api_key = openai_key if llm_provider == "openai" else (gemini_key if llm_provider == "gemini" else None)
+    
+    try:
+        inst_id = await get_effective_installation_id(request.installation_id)
+    except Exception:
+        inst_id = None
+
+    task = audit_pr_task.delay(
+        owner=request.owner,
+        repo=request.repo,
+        pull_number=request.pull_number,
+        installation_id=inst_id,
+        github_token=raw_request.headers.get("x-github-token"),
+        llm_provider=llm_provider,
+        api_key=api_key,
+        model=ollama_model,
+        ollama_url=ollama_url
+    )
+    return {"status": "accepted", "task_id": task.id}
+
+
+@router.get("/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    Retrieves the execution status and eventual result of a background Celery task.
+    """
+    res = AsyncResult(task_id, app=celery_app)
+    
+    response = {
+        "task_id": task_id,
+        "status": res.status, # PENDING, STARTED, RETRY, FAILURE, SUCCESS
+    }
+    
+    if res.ready():
+        if res.status == "SUCCESS":
+            response["result"] = res.result
+        else:
+            response["error"] = str(res.result)
+            
+    return response
+
