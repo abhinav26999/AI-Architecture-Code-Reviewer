@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   ShieldAlert, 
   BarChart3, 
@@ -91,6 +91,9 @@ export default function Home() {
   const [isGeneratingAiFix, setIsGeneratingAiFix] = useState<boolean>(false);
   const [aiFixText, setAiFixText] = useState<string>("");
 
+  // Ref for auto-scrolling inspector into view when a violation is selected
+  const inspectorRef = useRef<HTMLDivElement>(null);
+
   // Private Repo Authorization Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalDetails, setAuthModalDetails] = useState<{ platform: string; owner: string; repo: string }>({
@@ -147,6 +150,12 @@ export default function Home() {
       .catch(err => console.error("Failed to load PRs:", err))
       .finally(() => setIsLoadingPRs(false));
   }, [selectedRepo, publicRepoUrl, scanMode, scannedRepoName, repositories]);
+
+  // Reset Violation Inspector state when repository selection, scan mode, or active tab changes
+  useEffect(() => {
+    setSelectedViolation(null);
+    setAiFixText("");
+  }, [selectedRepo, publicRepoUrl, scanMode, activeTab]);
 
   // Load Repositories from backend
   useEffect(() => {
@@ -360,6 +369,8 @@ export default function Home() {
           rule_name: v.rule_name,
           message: v.message,
           file_path: v.file_path,
+          severity: v.severity,
+          suggested_fix: v.suggested_fix || "",
           code_snippet: v.code_snippet || ""
         })
       });
@@ -632,7 +643,7 @@ export default function Home() {
 
                 </div>
 
-                {/* VIOLATIONS TABLE */}
+                {/* VIOLATIONS TABLE — scrolls internally so inspector stays visible */}
                 <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
                     <h3 className="font-bold text-sm text-slate-900">Detected Rule Violations</h3>
@@ -648,11 +659,14 @@ export default function Home() {
                       <p className="text-xs max-w-sm mx-auto">Your repository cleanly complies with N+1 query limits, async boundaries, and layer constraints.</p>
                     </div>
                   ) : (
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
                       {violations.map((v, i) => (
                         <div 
                           key={i}
-                          onClick={() => setSelectedViolation(v)}
+                          onClick={() => {
+                            setSelectedViolation(v);
+                            setAiFixText("");
+                          }}
                           className={`p-4 hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-between ${selectedViolation === v ? "bg-indigo-50/80" : ""}`}
                         >
                           <div className="flex items-center space-x-3.5">
@@ -681,9 +695,12 @@ export default function Home() {
 
               </div>
 
-              {/* RIGHT SIDEBAR: CODE SNIPPET INSPECTOR */}
+              {/* RIGHT SIDEBAR: CODE SNIPPET INSPECTOR — sticky so it stays in view while scrolling violations */}
               <div className="space-y-6">
-                <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-4">
+                <div
+                  ref={inspectorRef}
+                  className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-4 sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
                   <h3 className="font-bold text-sm text-slate-900 border-b border-slate-200 pb-3 flex items-center space-x-2">
                     <FileCode className="w-4 h-4 text-indigo-600" />
                     <span>Violation Inspector</span>
@@ -731,17 +748,62 @@ export default function Home() {
                         </button>
                       </div>
 
-                      {aiFixText && (
-                        <div className="p-4 bg-slate-900 text-slate-100 rounded-xl space-y-2 border border-slate-800">
-                          <div className="text-xs font-bold text-indigo-400 flex items-center gap-1.5 border-b border-slate-800 pb-2">
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>AI Architect Refactoring Guidance</span>
+                      {aiFixText && (() => {
+                        // Parse plain-text sections separated by [LABEL] markers
+                        const sectionDefs = [
+                          { key: "ROOT CAUSE",    icon: "🔍", label: "Root Cause",    color: "bg-rose-50 border-rose-200",      labelColor: "text-rose-700",    textColor: "text-rose-900" },
+                          { key: "IMPACT",        icon: "⚡", label: "Impact",        color: "bg-amber-50 border-amber-200",    labelColor: "text-amber-700",   textColor: "text-amber-900" },
+                          { key: "HOW TO FIX",    icon: "🛠️", label: "How to Fix",    color: "bg-indigo-50 border-indigo-200",  labelColor: "text-indigo-700",  textColor: "text-indigo-900" },
+                          { key: "BEST PRACTICE", icon: "✅", label: "Best Practice", color: "bg-emerald-50 border-emerald-200", labelColor: "text-emerald-700", textColor: "text-emerald-900" },
+                        ];
+
+                        const parseSections = (raw: string) => {
+                          const result: Record<string, string> = {};
+                          sectionDefs.forEach(({ key }) => {
+                            const regex = new RegExp(`\\[${key}\\]([\\s\\S]*?)(?=\\[(?:${sectionDefs.map(s => s.key).join("|")})\\]|$)`, "i");
+                            const match = raw.match(regex);
+                            if (match) result[key] = match[1].trim();
+                          });
+                          return result;
+                        };
+
+                        const sections = parseSections(aiFixText);
+                        const hasSections = Object.keys(sections).length > 0;
+
+                        return (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-1.5 pb-1">
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                              <span className="text-xs font-bold text-slate-700">AI Architect Refactoring Guidance</span>
+                            </div>
+
+                            {hasSections ? (
+                              sectionDefs.map(({ key, icon, label, color, labelColor, textColor }) =>
+                                sections[key] ? (
+                                  <div key={key} className={`rounded-xl border p-3 space-y-1.5 ${color}`}>
+                                    <div className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${labelColor}`}>
+                                      <span>{icon}</span>
+                                      <span>{label}</span>
+                                    </div>
+                                    <div className={`text-xs leading-relaxed ${textColor}`}>
+                                      {sections[key].split("\n").map((line, idx) => (
+                                        <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null
+                              )
+                            ) : (
+                              // Fallback: plain clean text if AI didn't follow section format
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 leading-relaxed">
+                                {aiFixText.split("\n").map((line, idx) => (
+                                  <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          <div className="prose prose-invert prose-xs max-w-none text-xs text-slate-200 whitespace-pre-wrap leading-relaxed break-words">
-                            {aiFixText}
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {selectedViolation.code_snippet && (
                         <div>

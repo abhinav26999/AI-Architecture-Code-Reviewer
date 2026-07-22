@@ -1,0 +1,20 @@
+{
+  "language": "Dart / Flutter",
+  "extensions": [".dart"],
+  "loop_keywords": ["for (", "for(", "for ", "while (", "while(", "forEach(", ".map(", ".where(", "do {"],
+  "db_patterns": [
+    "await dio.get", "await dio.post", "await dio.put", "await dio.delete",
+    "await http.get", "await http.post", "await http.put", "await http.delete",
+    "await supabase.", "await Supabase.", "await FirebaseFirestore.",
+    "await firestore.", "await _db.", "await database.", "await db.",
+    "await repository.", "await _repository.", "await apiService.",
+    "await _apiService.", "await dataSource.", "await remoteDataSource.",
+    ".find(", ".findAll(", ".query(", ".insert(", ".update(", ".delete(",
+    ".save(", ".fetch(", ".get(", "getIt<"
+  ],
+  "blocking_patterns": [
+    "sleep(", "Thread.sleep(", "Future.delayed(Duration.zero",
+    "Isolate.run(", "compute("
+  ],
+  "loop_end_keywords": ["}"]
+}

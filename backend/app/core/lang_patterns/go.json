@@ -1,0 +1,20 @@
+{
+  "language": "Go (Golang)",
+  "extensions": [".go"],
+  "loop_keywords": ["for ", "for {", "range "],
+  "db_patterns": [
+    "db.Query(", "db.QueryRow(", "db.Exec(", "db.Prepare(", "db.Begin(",
+    "tx.Query(", "tx.QueryRow(", "tx.Exec(",
+    "rows.Scan(", "row.Scan(",
+    "gorm.Find(", "gorm.First(", "gorm.Save(", "gorm.Create(", "gorm.Delete(", "gorm.Update(",
+    ".Find(", ".First(", ".Save(", ".Create(", ".Delete(", ".Update(", ".Where(",
+    "http.Get(", "http.Post(", "http.NewRequest(",
+    "client.Get(", "client.Post(", "client.Do(",
+    "repository.Find", "repository.Save", "repository.Delete"
+  ],
+  "blocking_patterns": [
+    "time.Sleep(", "sync.Mutex.Lock(", "wg.Wait(", "channel <-", "<-channel",
+    "os.Stdin.Read(", "bufio.NewScanner("
+  ],
+  "loop_end_keywords": ["}"]
+}

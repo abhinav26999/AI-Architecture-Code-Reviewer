@@ -21,7 +21,7 @@ class RuleEngine:
             self.ts_lang = tree_sitter.Language(tree_sitter_typescript.language_typescript())
             self.tsx_lang = tree_sitter.Language(tree_sitter_typescript.language_tsx())
             
-            # Map extensions
+            # Map extensions to (language_name, tree_sitter_parser)
             self.lang_map = {
                 ".py": ("python", self.py_lang),
                 ".js": ("javascript", self.tsx_lang),
@@ -34,6 +34,72 @@ class RuleEngine:
         except Exception as e:
             logger.error(f"Failed to load Tree-sitter languages in RuleEngine: {e}")
             raise
+
+        # Load per-language pattern files from lang_patterns/ directory
+        self.lang_patterns: Dict[str, dict] = {}
+        self._load_lang_patterns()
+
+        # Extension -> language name mapping for all supported languages
+        self.ext_to_lang: Dict[str, str] = {
+            ".py": "python",
+            ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+            ".ts": "typescript", ".tsx": "typescript",
+            ".dart": "dart",
+            ".java": "java",
+            ".kt": "kotlin", ".kts": "kotlin",
+            ".swift": "swift",
+            ".go": "go",
+            ".rs": "rust",
+            ".cs": "csharp",
+            ".rb": "ruby",
+            ".php": "php",
+            ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp",
+            ".c": "c",
+            ".h": "c", ".hpp": "cpp",
+            ".scala": "scala",
+            ".ex": "elixir", ".exs": "elixir",
+            ".vue": "javascript",
+            ".svelte": "javascript",
+            ".r": "r", ".R": "r",
+            ".lua": "lua",
+            ".groovy": "groovy",
+        }
+
+    def _load_lang_patterns(self):
+        """Loads all per-language pattern JSON files from the lang_patterns/ directory."""
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        patterns_dir = os.path.abspath(os.path.join(dir_path, "..", "..", "core", "lang_patterns"))
+        if not os.path.isdir(patterns_dir):
+            logger.warning(f"RuleEngine: lang_patterns directory not found at {patterns_dir}. Using built-in defaults.")
+            return
+        for fname in os.listdir(patterns_dir):
+            if fname.endswith(".json"):
+                lang_name = fname.replace(".json", "")
+                try:
+                    with open(os.path.join(patterns_dir, fname), "r") as f:
+                        self.lang_patterns[lang_name] = json.load(f)
+                    logger.info(f"RuleEngine: Loaded pattern file '{fname}' for language '{lang_name}'.")
+                except Exception as e:
+                    logger.error(f"RuleEngine: Failed to load lang pattern '{fname}': {e}")
+
+    def _get_lang_patterns(self, lang_name: str) -> dict:
+        """Returns pattern dict for a given language, falling back to a universal default."""
+        p = self.lang_patterns.get(lang_name, {})
+        if p:
+            return p
+        # Universal fallback patterns covering common patterns across all languages
+        return {
+            "loop_keywords": ["for (", "for(", "for ", "while (", "while(", "forEach(", ".map(", "for {", "foreach ", "do {"],
+            "db_patterns": [
+                "db.", "query", "execute", "repo.", "repository.", "fetch(",
+                "http.", "find", "save", "insert", "update", "select", "delete",
+                "client.get", "client.post", "client.put", "request."
+            ],
+            "blocking_patterns": [
+                "sleep(", "Thread.sleep", "Sync(", "readFileSync", "delay(",
+                "time.sleep", "block_on(", "join("
+            ]
+        }
 
     def load_profile(self, clone_path: str) -> dict:
         """
@@ -154,48 +220,68 @@ class RuleEngine:
         parser_lang: Optional[tree_sitter.Language]
     ) -> List[RuleViolation]:
         """Parses file contents to run AST-level performance and safety checkers (uses Tree-sitter or AI fallback)."""
-        # If parser_lang is not available (e.g. Dart, Java, Go, Kotlin, Swift, C#), run high-speed pattern scanner (0ms)
+        # If parser_lang is not available (e.g. Dart, Java, Go, Kotlin, Swift, C#),
+        # run high-speed language-aware pattern scanner (0ms latency)
         if not parser_lang:
             logger.info(f"RuleEngine: Running high-speed pattern scanner for '{file_path}' (Language: {language})")
             violations: List[RuleViolation] = []
             lines = content.splitlines()
             in_loop = False
             in_async = False
-            
-            db_patterns = ("db.", "query", "execute", "repo.", "repository.", "fetch(", "http.", "find", "save", "insert", "update", "select")
-            blocking_patterns = ("sleep(", "Thread.sleep", "Sync(", "readFileSync", "delay(")
+            brace_depth = 0
+            loop_brace_depth = -1
+
+            # Load language-specific patterns from lang_patterns/
+            pat = self._get_lang_patterns(language)
+            loop_keywords: list = pat.get("loop_keywords", [])
+            db_patterns: tuple = tuple(pat.get("db_patterns", []))
+            blocking_patterns: tuple = tuple(pat.get("blocking_patterns", []))
+            async_keywords = ["async ", "async{", "Future<", "Task<", "Promise<", "async def", "async fn", "asyncio"]
 
             for idx, line in enumerate(lines, 1):
                 clean_line = line.strip()
-                if any(k in clean_line for k in ("for (", "for(", "for ", "while (", "while(", "forEach(", ".map(")):
+
+                # Track brace depth for loop scope detection
+                brace_depth += clean_line.count("{") - clean_line.count("}")
+
+                # Detect loop start
+                if any(k in clean_line for k in loop_keywords):
                     in_loop = True
-                if any(k in clean_line for k in ("async", "Future<", "Task<", "Promise<")):
+                    loop_brace_depth = brace_depth
+
+                # Detect loop end (brace-based scope exit)
+                if in_loop and brace_depth < loop_brace_depth:
+                    in_loop = False
+                    loop_brace_depth = -1
+
+                # Detect async scope
+                if any(k in clean_line for k in async_keywords):
                     in_async = True
 
-                # Rule A: N+1 Query Detector in Loops
+                # Rule A: N+1 Query / HTTP Operation in Loops
                 if in_loop and any(pat in clean_line.lower() for pat in db_patterns):
                     violations.append(RuleViolation(
                         rule_name="N+1 Query Detector",
                         severity="HIGH",
                         file_path=file_path,
                         line=idx,
-                        message=f"Performance bottleneck: Potential query/HTTP operation inside loop: '{clean_line[:70]}'",
-                        suggested_fix="Extract operation outside loop block and batch fetch/save requests."
+                        message=f"Performance bottleneck: {language.capitalize()} — query/HTTP operation inside loop: '{clean_line[:80]}'",
+                        suggested_fix="Extract the operation outside the loop. Collect all needed IDs first, then batch fetch/save in a single call."
                     ))
 
-                # Rule B: Blocking Async Scope
+                # Rule B: Blocking Call in Async Scope
                 if in_async and any(pat in clean_line for pat in blocking_patterns):
                     violations.append(RuleViolation(
                         rule_name="Blocking Async Scope",
                         severity="MEDIUM",
                         file_path=file_path,
                         line=idx,
-                        message=f"Concurrency issue: Synchronous blocking operation inside async scope: '{clean_line[:70]}'",
-                        suggested_fix="Replace blocking call with non-blocking async counterpart (e.g. Future.delayed, await)."
+                        message=f"Concurrency issue: {language.capitalize()} — synchronous blocking call inside async scope: '{clean_line[:80]}'",
+                        suggested_fix="Replace the blocking call with its non-blocking async counterpart for this language/framework."
                     ))
 
             if len(violations) == 0:
-                logger.info(f"RuleEngine: Pattern checks completed successfully for '{file_path}'. No violations found.")
+                logger.info(f"RuleEngine: Pattern checks completed for '{file_path}'. No violations found.")
             return violations
 
         logger.info(f"RuleEngine: Checking AST rules for '{file_path}' (Language: {language})")
@@ -205,10 +291,15 @@ class RuleEngine:
         parser = tree_sitter.Parser(parser_lang)
         tree = parser.parse(code_bytes)
 
-        # Local patterns to look for
-        db_patterns = ("db.", "query", "execute", "repo.", "repository.", "prisma.", "find", "save", "insert", "delete", "update")
-        blocking_patterns_py = ("time.sleep", "requests.get", "requests.post", "urllib.request", "subprocess.run")
-        blocking_patterns_ts = ("fs.readFileSync", "fs.writeFileSync", "execSync", "sleepSync")
+        # Load language-specific patterns for AST scanner
+        pat = self._get_lang_patterns(language)
+        db_patterns: tuple = tuple(pat.get("db_patterns", [
+            "db.", "query", "execute", "repo.", "repository.", "prisma.",
+            "find", "save", "insert", "delete", "update"
+        ]))
+        blocking_patterns_lang: tuple = tuple(pat.get("blocking_patterns", [
+            "time.sleep", "requests.get", "fs.readFileSync", "execSync", "subprocess.run"
+        ]))
 
         def traverse(node: tree_sitter.Node, loop_depth: int = 0, async_depth: int = 0):
             # Check loop nodes
@@ -255,30 +346,18 @@ class RuleEngine:
                                 suggested_fix=f"Extract '{call_text}' outside the loop block. Collect IDs and use bulk fetch/batch operations before iterating."
                             ))
 
-                    # Rule B: Blocking Sync calls in Async Contexts
+                    # Rule B: Blocking Sync calls in Async Contexts (language-aware)
                     if async_depth > 0:
-                        if language == "python":
-                            if any(pat in call_text for pat in blocking_patterns_py):
-                                logger.warning(f"RuleEngine: [MEDIUM VIOLATION] Blocking call '{call_text}' in async scope in '{file_path}' at line {node.start_point[0] + 1}")
-                                violations.append(RuleViolation(
-                                    rule_name="Blocking Async Scope",
-                                    severity="MEDIUM",
-                                    file_path=file_path,
-                                    line=node.start_point[0] + 1,
-                                    message=f"Concurrency issue: Synchronous blocking call '{call_text}' executed inside an async scope.",
-                                    suggested_fix=f"Replace synchronous call '{call_text}' with its non-blocking async counterpart (e.g. asyncio.sleep, httpx.AsyncClient)."
-                                ))
-                        else:  # JS/TS
-                            if any(pat in call_text for pat in blocking_patterns_ts):
-                                logger.warning(f"RuleEngine: [MEDIUM VIOLATION] Blocking FS/subprocess call '{call_text}' in async scope in '{file_path}' at line {node.start_point[0] + 1}")
-                                violations.append(RuleViolation(
-                                    rule_name="Blocking Async Scope",
-                                    severity="MEDIUM",
-                                    file_path=file_path,
-                                    line=node.start_point[0] + 1,
-                                    message=f"Concurrency issue: Synchronous blocking filesystem/shell call '{call_text}' executed inside an async scope.",
-                                    suggested_fix=f"Replace synchronous blocking call '{call_text}' with its non-blocking async counterpart (e.g. fs.promises.readFile, execa)."
-                                ))
+                        if any(pat in call_text for pat in blocking_patterns_lang):
+                            logger.warning(f"RuleEngine: [MEDIUM VIOLATION] Blocking call '{call_text}' in async scope in '{file_path}' at line {node.start_point[0] + 1}")
+                            violations.append(RuleViolation(
+                                rule_name="Blocking Async Scope",
+                                severity="MEDIUM",
+                                file_path=file_path,
+                                line=node.start_point[0] + 1,
+                                message=f"Concurrency issue: Synchronous blocking call '{call_text}' executed inside an async scope.",
+                                suggested_fix=f"Replace '{call_text}' with its non-blocking async counterpart for {language} (e.g. asyncio.sleep / httpx for Python, fs.promises / execa for Node.js)."
+                            ))
 
             # Recursively traverse children
             for child in node.children:
@@ -305,13 +384,14 @@ class RuleEngine:
         # 1. Run Graph-based boundary checks
         violations.extend(self.check_layer_boundaries(graph, profile))
 
-        # 2. Run AST-based checks on files
+        # 2. Run AST-based checks on files (all languages supported)
         for parsed in parsed_files:
-            ext = os.path.splitext(parsed.file_path)[1]
-            mapped = self.lang_map.get(ext.lower())
-            
+            ext = os.path.splitext(parsed.file_path)[1].lower()
+            mapped = self.lang_map.get(ext)
+
             if not mapped:
-                lang_name = ext.lower().replace(".", "")
+                # Use ext_to_lang for broader language name coverage (Dart, Go, Kotlin, etc.)
+                lang_name = self.ext_to_lang.get(ext, ext.replace(".", ""))
                 parser_lang = None
             else:
                 lang_name, parser_lang = mapped

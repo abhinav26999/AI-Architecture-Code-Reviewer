@@ -1,0 +1,19 @@
+{
+  "language": "JavaScript / TypeScript",
+  "extensions": [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"],
+  "loop_keywords": ["for (", "for(", "for ", "while (", "while(", "forEach(", ".map(", ".filter(", ".reduce(", "do {"],
+  "db_patterns": [
+    "await db.", "await pool.", "await client.", "await prisma.", "await mongoose.",
+    "await Model.", "await User.", "await sequelize.", "await knex.",
+    "fetch(", "axios.get(", "axios.post(", "axios.put(", "axios.delete(", "axios.patch(",
+    "http.get(", "http.post(", "https.get(", "https.post(",
+    "repository.find", "repository.save", "repository.delete", "repository.update",
+    ".find(", ".findOne(", ".findById(", ".findAll(", ".save(", ".create(",
+    ".insert(", ".update(", ".delete(", ".remove(", ".exec(", ".query("
+  ],
+  "blocking_patterns": [
+    "readFileSync(", "writeFileSync(", "execSync(", "spawnSync(",
+    "Atomics.wait(", "fs.readFileSync", "fs.writeFileSync", "child_process.execSync"
+  ],
+  "loop_end_keywords": ["}"]
+}
