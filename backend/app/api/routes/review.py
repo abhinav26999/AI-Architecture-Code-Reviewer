@@ -476,25 +476,27 @@ def get_context_window(content: str, line_number: Optional[int], snippet: Option
         except Exception:
             pass
 
-    # Extract 20 lines before and after
-    start_idx = max(0, target_line - 21)
-    end_idx = min(total_lines, target_line + 20)
+    # Extract a contiguous window: 25 lines before and 25 lines after target_line
+    start_idx = max(0, target_line - 26)
+    end_idx = min(total_lines, target_line + 25)
     
     context_lines = lines[start_idx:end_idx]
-    
-    # Prepend first 15 lines of the file for imports/class declarations
-    prefix_lines = lines[0:min(15, total_lines)]
-    
-    if start_idx < 15:
-        # Overlap! Just return 0 to end_idx
-        result_lines = lines[0:end_idx]
-    else:
-        result_lines = prefix_lines + ["... [snip] ..."] + context_lines
-        
-    return "\n".join(result_lines)
+    return "\n".join(context_lines)
 
 
-def find_local_workspace_root() -> str:
+def find_local_workspace_root(repo_name: Optional[str] = None) -> str:
+    if repo_name:
+        # Check standard folders for local repository clone
+        search_dirs = [
+            "/Users/aeologicbuddy/Desktop/Aeologic Projects",
+            "/Users/aeologicbuddy/Desktop/Clients Project",
+            "/Users/aeologicbuddy/Desktop"
+        ]
+        for sd in search_dirs:
+            path = os.path.join(sd, repo_name)
+            if os.path.exists(path):
+                return os.path.abspath(path)
+
     # Start from current directory and go up until we find rules.md or backend/
     current = os.path.abspath(os.getcwd())
     for _ in range(4):
@@ -502,6 +504,7 @@ def find_local_workspace_root() -> str:
             return current
         current = os.path.dirname(current)
     return os.path.abspath(os.getcwd())
+
 
 def apply_patch_to_content(content: str, original_snippet: str, fixed_snippet: str) -> str:
     # Normalize line endings
@@ -543,6 +546,8 @@ class ApplyLocalFixRequest(BaseModel):
     original_snippet: str
     fixed_code: str
     local_workspace_path: Optional[str] = None
+    owner: Optional[str] = None
+    repo: Optional[str] = None
 
 
 class CreateFixPRRequest(BaseModel):
@@ -612,7 +617,7 @@ async def preview_fix_suggestion(request: ApplyFixRequest, raw_request: Request)
     # Try reading from local workspace first
     local_workspace_path = raw_request.headers.get("x-local-workspace-path")
     if not local_workspace_path:
-        local_workspace_path = find_local_workspace_root()
+        local_workspace_path = find_local_workspace_root(request.repo)
         
     local_file_path = os.path.join(local_workspace_path, request.file_path)
     if os.path.exists(local_file_path):
@@ -701,7 +706,7 @@ async def preview_fix_suggestion(request: ApplyFixRequest, raw_request: Request)
         )
         
         return {
-            "original_snippet": request.code_snippet or original_content,
+            "original_snippet": code_context,
             "fixed_snippet": fix_result["fixed_code"],
             "explanation": fix_result["explanation"],
             "stale_warning": stale_warning,
@@ -740,7 +745,7 @@ async def apply_local_fix(request: ApplyLocalFixRequest, raw_request: Request):
     """
     local_workspace_path = raw_request.headers.get("x-local-workspace-path")
     if not local_workspace_path:
-        local_workspace_path = find_local_workspace_root()
+        local_workspace_path = find_local_workspace_root(request.repo)
         
     local_file_path = os.path.abspath(os.path.join(local_workspace_path, request.file_path))
     

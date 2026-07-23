@@ -16,7 +16,8 @@ import {
   Activity,
   Layers,
   Globe,
-  Link as LinkIcon
+  Link as LinkIcon,
+  X
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import DependencyGraph from "../components/DependencyGraph";
@@ -106,8 +107,22 @@ export default function Home() {
   const [isCreatingPR, setIsCreatingPR] = useState<boolean>(false);
   const [prError, setPrError] = useState<{ message: string; tip: string } | null>(null);
 
+  // Helper to change selected violation and reset all related AI suggestion / fix state variables
+  const selectViolationAndClearState = (v: Violation) => {
+    setSelectedViolation(v);
+    setAiFixText("");
+    setFixResult(null);
+    setFixError(null);
+    setCreatedPRInfo(null);
+    setPrError(null);
+    setIsFixModalOpen(false);
+  };
+
   // Ref for auto-scrolling inspector into view when a violation is selected
   const inspectorRef = useRef<HTMLDivElement>(null);
+
+  // Studio Modal State
+  const [isFixModalOpen, setIsFixModalOpen] = useState<boolean>(false);
 
   // Private Repo Authorization Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -561,6 +576,8 @@ export default function Home() {
     setCreatedPRInfo(null);
     setPrError(null);
 
+    const { owner, repo } = getOwnerAndRepo();
+
     try {
       const response = await fetch("http://localhost:8000/api/v1/review/apply-local-fix", {
         method: "POST",
@@ -568,7 +585,9 @@ export default function Home() {
         body: JSON.stringify({
           file_path: v.file_path,
           original_snippet: fixResult.original_snippet,
-          fixed_code: fixResult.fixed_snippet
+          fixed_code: fixResult.fixed_snippet,
+          owner: owner || "",
+          repo: repo || ""
         })
       });
 
@@ -597,33 +616,51 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-indigo-500 selection:text-white pb-10">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 selection:bg-indigo-500 selection:text-white pb-16 font-sans antialiased relative overflow-hidden">
       
-      {/* HEADER SECTION */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      {/* Google Fonts Import & Global Reset */}
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+      <style jsx global>{`
+        body {
+          font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background-color: #f8fafc;
+        }
+        pre, code {
+          font-family: 'JetBrains Mono', monospace !important;
+        }
+      `}</style>
+
+      {/* Decorative Background Glows */}
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-200/20 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />
+      <div className="absolute top-[20%] right-[10%] w-[600px] h-[600px] bg-violet-200/20 rounded-full blur-3xl pointer-events-none -z-10" />
+
+      {/* STYLISH FLOATING HEADER */}
+      <header className="sticky top-4 z-30 px-6 max-w-7xl mx-auto mt-4">
+        <div className="flex items-center justify-between px-6 h-16 bg-white border border-slate-200/60 rounded-2xl shadow-sm transition-all duration-300">
           <div className="flex items-center space-x-3">
-              <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-md shadow-indigo-600/20">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="font-bold text-lg text-slate-900 tracking-tight">
-                  AI Code Architect
-                </span>
-                <span className="ml-2 text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">
+            <div className="p-2 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl text-white shadow-md shadow-indigo-500/20">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-extrabold text-base text-slate-900 tracking-tight flex items-center gap-2">
+                AI Code Architect
+                <span className="text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-600 font-bold px-2 py-0.5 rounded-full">
                   v1.0.0
                 </span>
-              </div>
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-4">
             {/* Active Provider Badge */}
-            <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700">
+            <div className="hidden sm:flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-600">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span>
-                AI: <strong className="text-slate-900 capitalize">{currentSettings.llmProvider}</strong>
+                AI Provider: <strong className="text-slate-800 capitalize font-bold">{currentSettings.llmProvider}</strong>
                 {currentSettings.llmProvider === "ollama" && currentSettings.ollamaModel && (
-                  <span className="text-slate-500 font-mono ml-1 text-[11px]">({currentSettings.ollamaModel})</span>
+                  <span className="text-slate-400 font-mono ml-1.5 text-[11px]">({currentSettings.ollamaModel})</span>
                 )}
               </span>
             </div>
@@ -631,82 +668,82 @@ export default function Home() {
             {/* Settings Button */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition shadow-sm"
+              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-indigo-50/60 hover:bg-indigo-50 hover:text-indigo-700 text-indigo-600 border border-indigo-200/60 text-xs font-bold transition shadow-sm cursor-pointer"
             >
-              <span>⚙️ Settings</span>
+              <span>⚙ Settings</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* DASHBOARD CONTAINER */}
-      <main className="max-w-7xl mx-auto px-6 mt-6">
+      <main className="max-w-7xl mx-auto px-6 mt-8">
 
-        {/* ONBOARDING STEPPER BANNER */}
-        <div className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/70 shadow-sm mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-bold tracking-wider uppercase text-indigo-800 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              Quick Onboarding Workflow
+        {/* ONBOARDING FLOW TIMELINE */}
+        <div className="p-5 rounded-2xl border border-slate-200/80 bg-white shadow-sm mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-extrabold tracking-wider uppercase text-indigo-600 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-indigo-500" />
+              Getting Started Checklist
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-start space-x-3 shadow-sm">
-              <div className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl flex items-start space-x-3.5 hover:shadow-xs transition">
+              <div className="w-7 h-7 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-600 font-extrabold text-xs flex items-center justify-center flex-shrink-0">
                 1
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-900">Select Code Base</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">Paste any public URL or select installed GitHub App repo</div>
+                <div className="text-xs font-bold text-slate-800">Select Code Base</div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">Input your repo link or select an installed GitHub App repo.</div>
               </div>
             </div>
 
-            <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-start space-x-3 shadow-sm">
-              <div className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+            <div className="p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl flex items-start space-x-3.5 hover:shadow-xs transition">
+              <div className="w-7 h-7 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-600 font-extrabold text-xs flex items-center justify-center flex-shrink-0">
                 2
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-900">Configure AI Provider</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  Currently: <span className="text-emerald-700 font-bold uppercase">{currentSettings.llmProvider}</span>
+                <div className="text-xs font-bold text-slate-800">Configure LLM</div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Active connection: <span className="text-emerald-600 font-extrabold uppercase">{currentSettings.llmProvider}</span>
                 </div>
               </div>
             </div>
 
-            <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-start space-x-3 shadow-sm">
-              <div className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+            <div className="p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl flex items-start space-x-3.5 hover:shadow-xs transition">
+              <div className="w-7 h-7 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-600 font-extrabold text-xs flex items-center justify-center flex-shrink-0">
                 3
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-900">Analyze Architecture</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">Run AST rule engine & view dependency graph & AI PR reviews</div>
+                <div className="text-xs font-bold text-slate-800">Review Audits</div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">Audit architecture violations and trigger AI Auto-Fix.</div>
               </div>
             </div>
           </div>
         </div>
         
-        {/* REPOSITORY ACTIONS & TRIGGER */}
-        <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-5">
+        {/* REPOSITORY SELECTION BAR */}
+        <div className="p-6 rounded-2xl border border-slate-200 bg-white space-y-6 shadow-sm">
           
-          {/* Mode Toggle */}
-          <div className="flex items-center space-x-2">
+          {/* Segmented Mode Picker */}
+          <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200/60 w-fit">
             <button
               onClick={() => setScanMode("public")}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-bold transition duration-200 ${
+              className={`flex items-center space-x-2 px-5 py-2 rounded-lg text-xs font-bold transition duration-200 cursor-pointer ${
                 scanMode === "public"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-white text-indigo-600 shadow-sm border border-slate-200/40"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
             >
               <Globe className="w-4 h-4" />
-              <span>Quick Scan (Public URL)</span>
+              <span>Public Scan</span>
             </button>
             <button
               onClick={() => setScanMode("github")}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-bold transition duration-200 ${
+              className={`flex items-center space-x-2 px-5 py-2 rounded-lg text-xs font-bold transition duration-200 cursor-pointer ${
                 scanMode === "github"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-white text-indigo-600 shadow-sm border border-slate-200/40"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
             >
               <Layers className="w-4 h-4" />
@@ -714,56 +751,56 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Public URL Scan */}
+          {/* Public URL Input layout */}
           {scanMode === "public" && (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div className="flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex-1 flex items-center space-x-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-500 shadow-sm">
-                  <LinkIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <div className="flex-1 flex items-center space-x-3.5 bg-slate-50 border border-slate-200 rounded-xl px-4.5 py-3 focus-within:ring-2 focus-within:ring-indigo-500 shadow-inner transition">
+                  <LinkIcon className="w-4.5 h-4.5 text-slate-400 flex-shrink-0" />
                   <input
                     type="text"
                     value={publicRepoUrl}
                     onChange={(e) => { setPublicRepoUrl(e.target.value); setScanError(""); }}
                     onKeyDown={(e) => { if (e.key === "Enter" && !isLoading) runPublicScan(); }}
-                    placeholder="Paste public GitHub, Bitbucket, or GitLab URL (e.g. https://bitbucket.org/workspace/repo)"
-                    className="bg-transparent text-slate-900 text-sm font-medium w-full focus:outline-none placeholder:text-slate-400"
+                    placeholder="Paste public GitHub URL (e.g. https://github.com/owner/repo)"
+                    className="bg-transparent text-slate-800 text-sm font-semibold w-full focus:outline-none placeholder:text-slate-400"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={runPublicScan}
                   disabled={isLoading}
-                  className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl font-bold bg-gradient-to-tr from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-md shadow-indigo-500/20 disabled:opacity-50 transition duration-200 cursor-pointer disabled:cursor-not-allowed"
+                  className="flex items-center justify-center space-x-2 px-7 py-3 rounded-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-md shadow-indigo-600/10 hover:shadow-indigo-500/20 disabled:opacity-50 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed"
                 >
                   <Search className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-                  <span>{isLoading ? "Scanning..." : "Scan Repository"}</span>
+                  <span>{isLoading ? "Analyzing..." : "Analyze Code"}</span>
                 </button>
               </div>
               {scanError && (
-                <div className="flex items-center space-x-2 text-rose-600 text-xs font-semibold px-1">
+                <div className="flex items-center space-x-2 text-rose-600 text-xs font-bold px-1 animate-pulse">
                   <AlertTriangle className="w-3.5 h-3.5" />
                   <span>{scanError}</span>
                 </div>
               )}
               {scannedRepoName && !isLoading && (
-                <div className="flex items-center space-x-2 text-emerald-600 text-xs font-semibold px-1">
+                <div className="flex items-center space-x-2 text-emerald-600 text-xs font-bold px-1">
                   <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Scan complete for {scannedRepoName}</span>
+                  <span>Repository analyzed successfully: {scannedRepoName}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* GitHub App Repos */}
+          {/* GitHub App Select layout */}
           {scanMode === "github" && (
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center space-x-3">
-                <Layers className="w-5 h-5 text-slate-500" />
-                <div className="text-sm font-bold text-slate-700">Select Active Repository:</div>
+              <div className="flex items-center space-x-4">
+                <Layers className="w-5 h-5 text-slate-400" />
+                <div className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">Select Active Repository:</div>
                 <select
                   value={selectedRepo}
                   onChange={(e) => setSelectedRepo(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer"
                 >
                   {repositories.map((repo) => (
                     <option key={repo.full_name || repo.name} value={repo.full_name || repo.name}>
@@ -776,46 +813,54 @@ export default function Home() {
               <button
                 onClick={runAnalysis}
                 disabled={isLoading}
-                className="flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20 disabled:opacity-50 transition duration-200"
+                className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/10 disabled:opacity-50 transition duration-200 cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-                <span>{isLoading ? "Running Architecture Scan..." : "Trigger Codebase Scan"}</span>
+                <span>{isLoading ? "Scanning Codebase..." : "Trigger Codebase Scan"}</span>
               </button>
             </div>
           )}
 
         </div>
 
-        {/* BACKGROUND TASK PROGRESS BANNER */}
+        {/* PROGRESS BANNER */}
         {(isLoading || isReviewing) && taskStatusMsg && (
-          <div className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 flex items-center space-x-3.5 animate-pulse shadow-sm">
+          <div className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 flex items-center space-x-3.5 shadow-sm animate-pulse">
             <RefreshCw className="w-5 h-5 text-indigo-600 animate-spin flex-shrink-0" />
             <div>
               <div className="text-xs font-bold text-indigo-900">Background Job Processing...</div>
-              <div className="text-[11px] text-indigo-700 font-medium mt-0.5">{taskStatusMsg}</div>
+              <div className="text-[11px] text-indigo-700/80 font-semibold mt-0.5">{taskStatusMsg}</div>
             </div>
           </div>
         )}
 
-        {/* TABS */}
-        <div className="flex border-b border-slate-200 mt-8 space-x-6 text-sm font-bold">
+        {/* TABS DESIGN - Segmented pills */}
+        <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200/60 w-fit mt-10">
           <button 
             onClick={() => setActiveTab("violations")}
-            className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "violations" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+            className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl text-xs font-bold transition duration-200 cursor-pointer ${
+              activeTab === "violations" 
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-200/40" 
+                : "text-slate-500 hover:text-slate-800"
+            }`}
           >
             <ShieldAlert className="w-4 h-4" />
             <span>Architecture Violations</span>
           </button>
           <button 
             onClick={() => setActiveTab("review")}
-            className={`pb-3 border-b-2 transition duration-200 flex items-center space-x-2 ${activeTab === "review" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+            className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl text-xs font-bold transition duration-200 cursor-pointer ${
+              activeTab === "review" 
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-200/40" 
+                : "text-slate-500 hover:text-slate-800"
+            }`}
           >
             <GitPullRequest className="w-4 h-4" />
             <span>Automated AI Reviews</span>
           </button>
         </div>
 
-        {/* CONTENT TABS */}
+        {/* CONTENT CHANNELS */}
         <div className="mt-8">
           
           {/* TAB 1: VIOLATIONS OVERVIEW */}
@@ -828,80 +873,104 @@ export default function Home() {
                 {/* METRICS & SCORE */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   
-                  {/* SCORE CARD */}
-                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
-                    <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">Architecture Score</span>
-                    <div className="flex items-baseline space-x-1 mt-4">
-                      <span className="text-5xl font-extrabold text-slate-900 tracking-tight">{score}</span>
-                      <span className="text-slate-400 text-lg">/100</span>
+                  {/* SCORE CARD WITH CIRCULAR SVG LOADER */}
+                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex items-center justify-between hover:shadow-md hover:border-slate-350/80 hover:-translate-y-0.5 transition-all duration-300 group">
+                    <div className="space-y-2">
+                      <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block">Architecture Score</span>
+                      <div className="flex items-baseline space-x-1">
+                        <span className="text-4xl font-extrabold text-slate-900 tracking-tight">{score}</span>
+                        <span className="text-slate-400 text-sm">/100</span>
+                      </div>
+                      <div className="flex items-center space-x-1.5 pt-2">
+                        <div className={`w-2 h-2 rounded-full ${score >= 90 ? "bg-emerald-500" : score >= 75 ? "bg-amber-500" : "bg-rose-500"} animate-pulse`} />
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          {score >= 90 ? "Excellent" : score >= 75 ? "Medium Risk" : "High Warning"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-4 flex items-center space-x-2">
-                      <div className={`w-2.5 h-2.5 rounded-full ${score >= 90 ? "bg-emerald-500 animate-pulse" : score >= 75 ? "bg-amber-500 animate-pulse" : "bg-rose-500 animate-pulse"}`} />
-                      <span className="text-xs font-semibold text-slate-600">
-                        {score >= 90 ? "Excellent Standards" : score >= 75 ? "Medium Risk Concerns" : "High Severity Warnings"}
-                      </span>
+
+                    {/* Circular Score Ring */}
+                    <div className="relative w-16 h-16 flex items-center justify-center">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle cx="32" cy="32" r="28" stroke="#f1f5f9" strokeWidth="6" fill="transparent" />
+                        <circle 
+                          cx="32" 
+                          cy="32" 
+                          r="28" 
+                          stroke={score >= 90 ? "#10b981" : score >= 75 ? "#f59e0b" : "#ef4444"} 
+                          strokeWidth="6" 
+                          fill="transparent" 
+                          strokeDasharray={2 * Math.PI * 28}
+                          strokeDashoffset={2 * Math.PI * 28 - (score / 100) * (2 * Math.PI * 28)}
+                          className="transition-all duration-1000 ease-out"
+                        />
+                      </svg>
+                      <span className="absolute text-xs font-extrabold text-slate-700">{score}%</span>
                     </div>
                   </div>
 
                   {/* COUPLING METRIC CARD */}
-                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
-                    <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">Circular Imports</span>
-                    <div className="flex items-baseline space-x-1 mt-4">
-                      <span className="text-5xl font-extrabold text-slate-900 tracking-tight">{graphData.circular_dependencies.length}</span>
+                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between hover:shadow-md hover:border-slate-350/80 hover:-translate-y-0.5 transition-all duration-300">
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Circular Imports</span>
+                    <div className="flex items-baseline space-x-1 mt-3">
+                      <span className="text-4xl font-extrabold text-slate-900 tracking-tight">{graphData.circular_dependencies.length}</span>
                     </div>
-                    <span className="text-xs text-slate-500 mt-4 block">Cycles increase coupling and dependency leaks.</span>
+                    <span className="text-[11px] text-slate-400 mt-4 leading-relaxed font-medium block">Active dependency loop cycles detected in AST.</span>
                   </div>
 
                   {/* CODE QUALITY VIOLATIONS */}
-                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
-                    <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">Total Violations</span>
-                    <div className="flex items-baseline space-x-1 mt-4">
-                      <span className="text-5xl font-extrabold text-slate-900 tracking-tight">{violations.length}</span>
+                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between hover:shadow-md hover:border-slate-350/80 hover:-translate-y-0.5 transition-all duration-300">
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Total Violations</span>
+                    <div className="flex items-baseline space-x-1 mt-3">
+                      <span className="text-4xl font-extrabold text-slate-900 tracking-tight">{violations.length}</span>
                     </div>
-                    <span className="text-xs text-slate-500 mt-4 block">Issues identified by rules parser.</span>
+                    <span className="text-[11px] text-slate-400 mt-4 leading-relaxed font-medium block">Lint & architecture boundary warnings.</span>
                   </div>
 
                 </div>
 
-                {/* VIOLATIONS TABLE — scrolls internally so inspector stays visible */}
+                {/* VIOLATIONS LIST */}
                 <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
-                    <h3 className="font-bold text-sm text-slate-900">Detected Rule Violations</h3>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">
+                  <div className="px-6 py-4.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between">
+                    <h3 className="font-extrabold text-sm text-slate-800 tracking-tight">Detected Rule Violations</h3>
+                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-200 text-slate-700">
                       {violations.length} Issues
                     </span>
                   </div>
 
                   {violations.length === 0 ? (
-                    <div className="p-12 text-center text-slate-500 space-y-3">
-                      <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto" />
+                    <div className="p-16 text-center text-slate-500 space-y-4">
+                      <CheckCircle className="w-14 h-14 text-emerald-500 mx-auto" />
                       <div className="text-base font-bold text-slate-900">No Architectural Violations Detected</div>
-                      <p className="text-xs max-w-sm mx-auto">Your repository cleanly complies with N+1 query limits, async boundaries, and layer constraints.</p>
+                      <p className="text-xs max-w-sm mx-auto text-slate-500 leading-relaxed">Your repository cleanly complies with N+1 query limits, async boundaries, and layer constraints.</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
                       {violations.map((v, i) => (
                         <div 
                           key={i}
-                          onClick={() => {
-                            setSelectedViolation(v);
-                            setAiFixText("");
-                          }}
-                          className={`p-4 hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-between ${selectedViolation === v ? "bg-indigo-50/80" : ""}`}
+                          onClick={() => selectViolationAndClearState(v)}
+                          className={`p-5 hover:bg-slate-50/70 transition cursor-pointer flex items-center justify-between border-l-4 ${
+                            selectedViolation === v 
+                              ? "bg-indigo-50/40 border-l-indigo-600 text-slate-900" 
+                              : "border-l-transparent text-slate-700"
+                          }`}
                         >
-                          <div className="flex items-center space-x-3.5">
-                            <AlertTriangle className={`w-5 h-5 flex-shrink-0 ${v.severity === "CRITICAL" || v.severity === "HIGH" ? "text-rose-500" : "text-amber-500"}`} />
+                          <div className="flex items-center space-x-4">
+                            <AlertTriangle className={`w-5.5 h-5.5 flex-shrink-0 ${
+                              v.severity === "CRITICAL" || v.severity === "HIGH" ? "text-rose-500" : "text-amber-500"
+                            }`} />
                             <div>
-                              <div className="font-bold text-sm text-slate-900">{v.rule_name}</div>
-                              <div className="text-xs text-slate-500 font-mono mt-0.5">{v.file_path}:{v.line}</div>
+                              <div className="font-extrabold text-sm text-slate-900">{v.rule_name}</div>
+                              <div className="text-xs text-slate-500 font-mono mt-1">{v.file_path}:{v.line}</div>
                             </div>
                           </div>
 
-                          <div className="flex items-center space-x-3">
-                            <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-md ${
+                          <div className="flex items-center space-x-3.5">
+                            <span className={`text-[10px] font-black px-2.5 py-1 rounded-md tracking-wider ${
                               v.severity === "CRITICAL" || v.severity === "HIGH" 
-                                ? "bg-rose-100 text-rose-700 border border-rose-200" 
-                                : "bg-amber-100 text-amber-800 border border-amber-200"
+                                ? "bg-rose-50 border border-rose-200 text-rose-600" 
+                                : "bg-amber-50 border border-amber-250 text-amber-700"
                             }`}>
                               {v.severity}
                             </span>
@@ -913,280 +982,119 @@ export default function Home() {
                   )}
                 </div>
 
-              </div>
-
-              {/* RIGHT SIDEBAR: CODE SNIPPET INSPECTOR — sticky so it stays in view while scrolling violations */}
+              </div>              {/* RIGHT SIDEBAR: CODE SNIPPET INSPECTOR */}
               <div className="space-y-6">
                 <div
                   ref={inspectorRef}
-                  className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-4 sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto"
+                  className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden sticky top-6 max-h-[calc(100vh-3rem)] flex flex-col text-slate-800"
                 >
-                  <h3 className="font-bold text-sm text-slate-900 border-b border-slate-200 pb-3 flex items-center space-x-2">
-                    <FileCode className="w-4 h-4 text-indigo-600" />
-                    <span>Violation Inspector</span>
-                  </h3>
+                  {/* Panel Header - Clean Light Theme */}
+                  <div className="flex items-center justify-between px-5 py-4 bg-slate-50 border-b border-slate-200 flex-shrink-0">
+                    <div className="flex items-center gap-2.5">
+                      <FileCode className="w-4.5 h-4.5 text-indigo-600" />
+                      <span className="text-sm font-bold text-slate-800 tracking-wide">Violation Inspector</span>
+                    </div>
+                    {selectedViolation && (
+                      <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md tracking-wide ${
+                        selectedViolation.severity === "CRITICAL" || selectedViolation.severity === "HIGH"
+                          ? "bg-rose-50 border border-rose-200 text-rose-700"
+                          : "bg-amber-50 border border-amber-250 text-amber-800"
+                      }`}>
+                        {selectedViolation.severity}
+                      </span>
+                    )}
+                  </div>
 
-                  {selectedViolation ? (
-                    <div className="space-y-4">
-                      <div>
-                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Rule</div>
-                        <div className="text-sm font-bold text-slate-900 mt-1">{selectedViolation.rule_name}</div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Location</div>
-                        <div className="text-xs font-mono text-indigo-600 mt-1 bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-indigo-200 break-all inline-block max-w-full">
-                          {selectedViolation.file_path}:{selectedViolation.line}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Description & Verdict</div>
-                        <p className="text-xs text-slate-700 mt-1 leading-relaxed break-words">{selectedViolation.message}</p>
-                      </div>
-
-                      {selectedViolation.suggested_fix && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
-                          <div className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
-                            <span>💡 Recommended Refactoring Fix</span>
-                          </div>
-                          <p className="text-xs text-emerald-900 leading-relaxed font-medium break-words">
-                            {selectedViolation.suggested_fix}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* AI REFACTORING CODE FIX GENERATOR */}
-                      <div className="pt-2">
-                        <button
-                          onClick={() => triggerAiFix(selectedViolation)}
-                          disabled={isGeneratingAiFix}
-                          className="w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm disabled:opacity-50 transition"
-                        >
-                          <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAiFix ? "animate-spin" : ""}`} />
-                          <span>{isGeneratingAiFix ? "AI Architect Generating Suggestions..." : "🤖 Generate AI Refactoring Suggestion"}</span>
-                        </button>
-                      </div>
-
-                      {aiFixText && (() => {
-                        // Parse plain-text sections separated by [LABEL] markers
-                        const sectionDefs = [
-                          { key: "ROOT CAUSE",    icon: "🔍", label: "Root Cause",    color: "bg-rose-50 border-rose-200",      labelColor: "text-rose-700",    textColor: "text-rose-900" },
-                          { key: "IMPACT",        icon: "⚡", label: "Impact",        color: "bg-amber-50 border-amber-200",    labelColor: "text-amber-700",   textColor: "text-amber-900" },
-                          { key: "HOW TO FIX",    icon: "🛠️", label: "How to Fix",    color: "bg-indigo-50 border-indigo-200",  labelColor: "text-indigo-700",  textColor: "text-indigo-900" },
-                          { key: "BEST PRACTICE", icon: "✅", label: "Best Practice", color: "bg-emerald-50 border-emerald-200", labelColor: "text-emerald-700", textColor: "text-emerald-900" },
-                        ];
-
-                        const parseSections = (raw: string) => {
-                          const result: Record<string, string> = {};
-                          sectionDefs.forEach(({ key }) => {
-                            const regex = new RegExp(`\\[${key}\\]([\\s\\S]*?)(?=\\[(?:${sectionDefs.map(s => s.key).join("|")})\\]|$)`, "i");
-                            const match = raw.match(regex);
-                            if (match) result[key] = match[1].trim();
-                          });
-                          return result;
-                        };
-
-                        const sections = parseSections(aiFixText);
-                        const hasSections = Object.keys(sections).length > 0;
-
-                        return (
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-1.5 pb-1">
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                              <span className="text-xs font-bold text-slate-700">AI Architect Refactoring Guidance</span>
-                            </div>
-
-                            {hasSections ? (
-                              sectionDefs.map(({ key, icon, label, color, labelColor, textColor }) =>
-                                sections[key] ? (
-                                  <div key={key} className={`rounded-xl border p-3 space-y-1.5 ${color}`}>
-                                    <div className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${labelColor}`}>
-                                      <span>{icon}</span>
-                                      <span>{label}</span>
-                                    </div>
-                                    <div className={`text-xs leading-relaxed ${textColor}`}>
-                                      {sections[key].split("\n").map((line, idx) => (
-                                        <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null
-                              )
-                            ) : (
-                              // Fallback: plain clean text if AI didn't follow section format
-                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 leading-relaxed">
-                                {aiFixText.split("\n").map((line, idx) => (
-                                  <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {/* AI AUTO-FIX PREVIEW & APPLY SECTION */}
-                      {(() => {
-                        const fileExt = selectedViolation.file_path.split('.').pop()?.toLowerCase() || '';
-                        const isLowConfidence = ["c", "cpp", "rust", "swift", "php"].includes(fileExt);
-                        const isMediumConfidence = ["java", "go", "kotlin", "dart", "csharp"].includes(fileExt);
-
-                        return (
-                          <div className="border-t border-slate-200 pt-4 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">Codebase Auto-Fix</span>
-                              {isMediumConfidence && (
-                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200 font-medium">
-                                  ⚠️ Medium Confidence
-                                </span>
-                              )}
-                              {isLowConfidence && (
-                                <span className="text-[10px] bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 font-medium">
-                                  ❌ Unsupported
-                                </span>
-                              )}
-                            </div>
-
-                            {isLowConfidence ? (
-                              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 leading-normal">
-                                Auto-Fix generation is not supported or reliable for {fileExt.toUpperCase()} files. Please apply the fix advice manually in your editor.
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                {isMediumConfidence && (
-                                  <p className="text-[10px] text-amber-600 leading-normal font-sans">
-                                    Note: AI fix accuracy may vary for {fileExt.toUpperCase()}. Please carefully review the previewed patch before applying.
-                                  </p>
-                                )}
-
-                                {!fixResult && !isApplyingFix && (
-                                  <button
-                                    onClick={() => triggerPreviewFix(selectedViolation)}
-                                    className="w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition"
-                                  >
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    <span>🤖 Generate Code Fix Preview</span>
-                                  </button>
-                                )}
-
-                                {isApplyingFix && (
-                                  <div className="flex items-center justify-center space-x-2 py-3 text-xs text-slate-500 font-semibold bg-slate-50 rounded-xl border border-slate-200">
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                                    <span>AI generating code patch preview...</span>
-                                  </div>
-                                )}
-
-                                {fixError && (
-                                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
-                                    <div className="font-bold text-rose-800">⚠️ {fixError.message}</div>
-                                    <p className="text-[11px] text-rose-600 leading-relaxed font-sans">{fixError.tip}</p>
-                                  </div>
-                                )}
-
-                                {fixResult && (
-                                  <div className="space-y-3 animate-in fade-in duration-200">
-                                    {fixResult.stale_warning && (
-                                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 leading-normal font-medium">
-                                        ⚠️ Warning: The file has been updated on GitHub since this review was scanned. Review the diff carefully before applying.
-                                      </div>
-                                    )}
-
-                                    {/* Split Screen Diff */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 border border-slate-200 rounded-xl overflow-hidden text-[10px] font-mono bg-white shadow-inner">
-                                      <div className="bg-rose-50/40 p-2.5 overflow-x-auto border-r border-slate-100 max-h-72">
-                                        <div className="text-[9px] font-bold text-rose-700 uppercase tracking-wider mb-1.5 border-b border-rose-100 pb-1">Original</div>
-                                        <pre className="text-rose-900 whitespace-pre">{fixResult.original_snippet}</pre>
-                                      </div>
-                                      <div className="bg-emerald-50/40 p-2.5 overflow-x-auto max-h-72">
-                                        <div className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 border-b border-emerald-100 pb-1">AI Corrected</div>
-                                        <pre className="text-emerald-900 whitespace-pre">{fixResult.fixed_snippet}</pre>
-                                      </div>
-                                    </div>
-
-                                    {/* Action Bar */}
-                                    <div className="flex gap-2">
-                                      <button
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(fixResult.fixed_snippet);
-                                          alert("Copied fixed snippet to clipboard!");
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 shadow-sm transition"
-                                      >
-                                        <span>📋 Copy Code</span>
-                                      </button>
-                                      
-                                      <button
-                                        onClick={() => triggerApplyLocalFix(selectedViolation)}
-                                        disabled={isCreatingPR || !!createdPRInfo}
-                                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md disabled:opacity-50 transition"
-                                      >
-                                        {isCreatingPR ? (
-                                          <>
-                                            <RefreshCw className="w-3 h-3 animate-spin" />
-                                            <span>Applying...</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Sparkles className="w-3 h-3" />
-                                            <span>🚀 Apply Fix Locally</span>
-                                          </>
-                                        )}
-                                      </button>
-                                    </div>
-
-                                    {fixResult.explanation && (
-                                      <p className="text-[11px] text-slate-500 leading-normal italic font-sans bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                        💡 <strong>Architect explanation:</strong> {fixResult.explanation}
-                                      </p>
-                                    )}
-
-                                    {createdPRInfo && (
-                                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1.5 shadow-sm animate-in zoom-in-95 duration-200">
-                                        <div className="font-bold flex items-center gap-1.5 text-emerald-800">
-                                          <CheckCircle className="w-4 h-4 text-emerald-600" />
-                                          <span>Local File Updated!</span>
-                                        </div>
-                                        <p className="text-[11px] text-emerald-900 font-sans leading-relaxed">
-                                          {createdPRInfo.message || "The architectural correction has been written to the local file successfully."}
-                                        </p>
-                                        <p className="text-[10px] text-slate-500 leading-normal mt-1 font-sans">
-                                          Check your local IDE (e.g. VS Code or `git diff`) to inspect the unstaged changes.
-                                        </p>
-                                      </div>
-                                    )}
-
-                                    {prError && (
-                                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
-                                        <div className="font-bold text-rose-800">⚠️ {prError.message}</div>
-                                        <p className="text-[11px] text-rose-600 font-sans leading-relaxed">{prError.tip}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {selectedViolation.code_snippet && (
+                  {/* Scrollable Inspector Content */}
+                  <div className="overflow-y-auto flex-1">
+                    {selectedViolation ? (
+                      <div className="p-5 space-y-4">
+                        
+                        {/* Rule Title */}
                         <div>
-                          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Code Context</div>
-                          <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] overflow-x-auto border border-slate-800">
-                            <code>{selectedViolation.code_snippet}</code>
-                          </pre>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Rule Violation</div>
+                          <div className="text-sm font-bold text-slate-900 leading-tight tracking-tight">{selectedViolation.rule_name}</div>
                         </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="py-12 text-center text-slate-400 space-y-2">
-                      <Search className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs">Click on any rule violation to inspect code context and fix advice.</p>
-                    </div>
-                  )}
+
+                        {/* Path Pill - Clean Light Pill */}
+                        <div>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Location</div>
+                          <div className="inline-flex items-center gap-2 bg-indigo-50 px-3.5 py-2 rounded-lg border border-indigo-150 max-w-full overflow-x-auto">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 flex-shrink-0" />
+                            <span className="text-[11px] font-mono text-indigo-600 whitespace-nowrap">{selectedViolation.file_path}:{selectedViolation.line}</span>
+                          </div>
+                        </div>
+
+                        {/* Verdict */}
+                        <div>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Description &amp; Verdict</div>
+                          <p className="text-xs text-slate-650 leading-relaxed break-words">{selectedViolation.message}</p>
+                        </div>
+
+                        {/* Suggested Refactoring fix - Green Box */}
+                        {selectedViolation.suggested_fix && (
+                          <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] p-4 space-y-2.5 shadow-xs">
+                            <div className="flex items-center gap-2">
+                              <div className="w-5 h-5 rounded-full bg-[#22c55e] flex items-center justify-center flex-shrink-0 shadow-sm shadow-emerald-500/10">
+                                <span className="text-white text-[9px] font-bold">✓</span>
+                              </div>
+                              <span className="text-[10px] font-extrabold text-[#166534] tracking-wide uppercase">Recommended Fix</span>
+                            </div>
+                            <p className="text-xs text-[#14532d] leading-relaxed font-semibold break-words pl-7">{selectedViolation.suggested_fix}</p>
+                          </div>
+                        )}
+
+                        {/* Interactive Studio Trigger Button */}
+                        <button
+                          onClick={() => {
+                            setIsFixModalOpen(true);
+                            if (!fixResult && !isApplyingFix) {
+                              triggerPreviewFix(selectedViolation);
+                            }
+                            if (!aiFixText && !isGeneratingAiFix) {
+                              triggerAiFix(selectedViolation);
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 transition-all duration-200 cursor-pointer mt-2"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Resolve in AI Studio</span>
+                        </button>
+
+                        {/* Code Context */}
+                        {selectedViolation.code_snippet && (
+                          <div className="space-y-2.5 pt-2">
+                            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Code Context</div>
+                            <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                              <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                                <div className="flex gap-1.5">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+                                  <div className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+                                  <div className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+                                </div>
+                              </div>
+                              <pre className="p-4 bg-slate-50 text-slate-700 font-mono text-[11px] overflow-x-auto leading-5">
+                                <code>{selectedViolation.code_snippet}</code>
+                              </pre>
+                            </div>
+                          </div>
+                        )}
+
+                      </div>
+                    ) : (
+                      <div className="py-20 text-center space-y-3.5 px-6">
+                        <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-200/60 flex items-center justify-center mx-auto">
+                          <Search className="w-5 h-5 text-slate-400" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-slate-500">No violation selected</p>
+                          <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">Click any rule violation to inspect the code context and AI fix advice.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-
             </div>
           )}
 
@@ -1197,33 +1105,33 @@ export default function Home() {
               {/* TRIGGER SECTION */}
               <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-5">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Audit Pull Request Changes & Comment</h3>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <h3 className="text-lg font-bold text-slate-900 tracking-tight">Audit Pull Request Changes & Comment</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                     Connects to your repository's Pull Request page, analyzes proposed code diffs, evaluates architecture rules, and publishes automated review critiques to GitHub.
                   </p>
                 </div>
 
                 {/* What is a PR Banner */}
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start gap-2.5">
-                  <GitPullRequest className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-start gap-3">
+                  <GitPullRequest className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold text-slate-900">What is a Pull Request (PR)?</span>
-                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    <span className="font-extrabold text-slate-800">What is a Pull Request (PR)?</span>
+                    <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                       A Pull Request is a set of code changes submitted by a developer. Each PR has a unique number (e.g. PR #1). Select an open PR below or enter its number to generate and publish an AI review directly to GitHub.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                   
-                  {/* PR Selector Dropdown or No PRs Found state */}
+                  {/* PR Selector Dropdown or Enter PR number manually */}
                   <div className="md:col-span-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-semibold text-slate-700">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
                         {openPRs.length > 0 ? `Select Pull Request (${openPRs.length} available)` : "Pull Request Selection"}
                       </label>
                       {isLoadingPRs && (
-                        <span className="text-[10px] text-slate-400 animate-pulse font-semibold">Fetching PRs...</span>
+                        <span className="text-[10px] text-slate-400 animate-pulse font-bold">Fetching PRs...</span>
                       )}
                     </div>
 
@@ -1231,7 +1139,7 @@ export default function Home() {
                       <select
                         value={prNumber}
                         onChange={(e) => setPrNumber(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:border-indigo-500 shadow-sm font-sans"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm cursor-pointer"
                       >
                         {openPRs.map((pr) => {
                           const stateLabel = pr.merged_at ? "MERGED" : pr.state ? pr.state.toUpperCase() : "OPEN";
@@ -1246,20 +1154,20 @@ export default function Home() {
                       </select>
                     ) : (
                       <div className="space-y-2">
-                        <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-800">
-                          <span className="font-semibold flex items-center gap-1.5">
+                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-800 font-medium">
+                          <span className="flex items-center gap-1.5">
                             ⚠️ No Pull Requests found in this repository.
                           </span>
                         </div>
 
-                        <div className="flex items-center space-x-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
-                          <span className="text-xs text-slate-400 font-semibold whitespace-nowrap">Enter PR # manually:</span>
+                        <div className="flex items-center space-x-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 focus-within:ring-2 focus-within:ring-indigo-500 shadow-inner">
+                          <span className="text-xs text-slate-500 font-bold whitespace-nowrap">Enter PR # manually:</span>
                           <input
                             type="number"
                             value={prNumber}
                             onChange={(e) => setPrNumber(e.target.value)}
                             placeholder="1"
-                            className="bg-transparent text-slate-900 font-bold text-sm w-full focus:outline-none"
+                            className="bg-transparent text-slate-800 font-bold text-sm w-full focus:outline-none"
                           />
                         </div>
                       </div>
@@ -1268,11 +1176,11 @@ export default function Home() {
 
                   {/* Trigger Button */}
                   <div className="md:col-span-1 pt-4 md:pt-0">
-                    <label className="hidden md:block text-xs font-semibold text-transparent mb-1">Action</label>
+                    <label className="hidden md:block text-xs font-semibold text-transparent mb-1.5">Action</label>
                     <button
                       onClick={triggerPRReview}
                       disabled={isReviewing || !prNumber}
-                      className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 transition text-xs cursor-pointer disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 transition text-xs cursor-pointer disabled:cursor-not-allowed"
                     >
                       {isReviewing ? (
                         <>
@@ -1293,16 +1201,16 @@ export default function Home() {
 
               {/* REVIEW BOARD */}
               {aiReview && (
-                <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm text-sm leading-relaxed space-y-4">
+                <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm text-sm leading-relaxed space-y-4 text-slate-800">
                   <div className="pb-4 border-b border-slate-200 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <div className="flex items-center gap-2 text-emerald-800 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl text-xs font-bold shadow-xs">
+                      <CheckCircle className="w-4 h-4 text-emerald-650 flex-shrink-0" />
                       <span>Code Review Published to Pull Request #{prNumber}</span>
                     </div>
                   </div>
 
                   {/* Displaying review markup */}
-                  <div className="whitespace-pre-wrap font-sans text-slate-800 text-xs">
+                  <div className="whitespace-pre-wrap font-sans text-slate-700 text-xs leading-relaxed bg-slate-50/50 border border-slate-200/50 rounded-xl p-4.5">
                     {aiReview}
                   </div>
                 </div>
@@ -1314,6 +1222,346 @@ export default function Home() {
         </div>
 
       </main>
+
+      {/* RESOLUTION STUDIO MODAL (WebStorm-style Side-by-Side Diff) */}
+      {isFixModalOpen && selectedViolation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-6xl w-full h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-205">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center space-x-3">
+                <Sparkles className="w-5 h-5 text-indigo-600 animate-pulse" />
+                <span className="font-extrabold text-slate-900 text-sm md:text-base tracking-tight">
+                  Resolution Studio: {selectedViolation.rule_name}
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1.5 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-150 text-[10px] font-mono text-indigo-600">
+                  {selectedViolation.file_path}:{selectedViolation.line}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsFixModalOpen(false)}
+                className="p-1.5 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body - Side by Side layout */}
+            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 bg-[#fafbfe]">
+              
+              {/* Left Column: AI Refactoring Suggestion Guidance (lg:col-span-4) */}
+              <div className="lg:col-span-4 flex flex-col space-y-4 overflow-y-auto pr-1">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
+                  <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">Issue Overview</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">{selectedViolation.message}</p>
+                </div>
+
+                {/* Recommended Fix Box */}
+                {selectedViolation.suggested_fix && (
+                  <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] p-4 space-y-2 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-[#22c55e] flex items-center justify-center flex-shrink-0">
+                        <span className="text-white text-[9px] font-bold">✓</span>
+                      </div>
+                      <span className="text-[10px] font-extrabold text-[#166534] tracking-wide uppercase">Recommended Fix</span>
+                    </div>
+                    <p className="text-xs text-[#14532d] leading-relaxed font-semibold break-words pl-7">
+                      {selectedViolation.suggested_fix}
+                    </p>
+                  </div>
+                )}
+
+                {/* AI Suggestions Section */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                      AI Refactoring Suggestions
+                    </h4>
+                  </div>
+
+                  {!aiFixText && !isGeneratingAiFix && (
+                    <button
+                      onClick={() => triggerAiFix(selectedViolation)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 transition cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Generate AI Suggestion</span>
+                    </button>
+                  )}
+
+                  {isGeneratingAiFix && (
+                    <div className="flex items-center justify-center gap-2.5 py-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                      <span className="text-xs text-slate-500 font-semibold">AI Architect analysis...</span>
+                    </div>
+                  )}
+
+                  {aiFixText && (() => {
+                    const sectionDefs = [
+                      { key: "ROOT CAUSE",    icon: "🔍", label: "Root Cause",    color: "bg-rose-50 border-rose-100",      labelColor: "text-rose-700",    textColor: "text-rose-800" },
+                      { key: "IMPACT",        icon: "⚡", label: "Impact",        color: "bg-amber-50 border-amber-100",    labelColor: "text-amber-700",   textColor: "text-amber-800" },
+                      { key: "HOW TO FIX",    icon: "🛠️", label: "How to Fix",    color: "bg-indigo-50 border-indigo-100",  labelColor: "text-indigo-700",  textColor: "text-indigo-800" },
+                      { key: "BEST PRACTICE", icon: "✅", label: "Best Practice", color: "bg-emerald-50 border-emerald-100", labelColor: "text-emerald-700", textColor: "text-emerald-805" },
+                    ];
+
+                    const parseSections = (raw: string) => {
+                      const result: Record<string, string> = {};
+                      sectionDefs.forEach(({ key }) => {
+                        const regex = new RegExp(`\\[${key}\\]([\\s\\S]*?)(?=\\[(?:${sectionDefs.map(s => s.key).join("|")})\\]|$)`, "i");
+                        const match = raw.match(regex);
+                        if (match) result[key] = match[1].trim();
+                      });
+                      return result;
+                    };
+
+                    const sections = parseSections(aiFixText);
+                    const hasSections = Object.keys(sections).length > 0;
+
+                    return (
+                      <div className="space-y-3 overflow-y-auto max-h-[360px]">
+                        {hasSections ? (
+                          sectionDefs.map(({ key, icon, label, color, labelColor, textColor }) =>
+                            sections[key] ? (
+                              <div key={key} className={`rounded-xl border p-3.5 space-y-1.5 ${color}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${labelColor}`}>
+                                  <span>{icon}</span>
+                                  <span>{label}</span>
+                                </div>
+                                <div className={`text-xs leading-relaxed ${textColor}`}>
+                                  {sections[key].split("\n").map((line, idx) => (
+                                    <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null
+                          )
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-white p-3.5 text-xs text-slate-600 leading-relaxed">
+                            {aiFixText.split("\n").map((line, idx) => (
+                              <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Right Column: Codebase Auto-Fix & WebStorm conflict resolution (lg:col-span-8) */}
+              <div className="lg:col-span-8 flex flex-col space-y-4 min-h-0">
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex-1 flex flex-col overflow-hidden min-h-0 space-y-4">
+                  
+                  {/* Panel Header */}
+                  <div className="flex items-center justify-between flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <FileCode className="w-4.5 h-4.5 text-indigo-600" />
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                        Code Conflict Resolution (WebStorm Diff Style)
+                      </span>
+                    </div>
+
+                    {/* Confidence tag */}
+                    {(() => {
+                      const fileExt = selectedViolation.file_path.split('.').pop()?.toLowerCase() || '';
+                      const isLowConfidence = ["c", "cpp", "rust", "swift", "php"].includes(fileExt);
+                      const isMediumConfidence = ["java", "go", "kotlin", "dart", "csharp"].includes(fileExt);
+
+                      return (
+                        <div className="flex items-center">
+                          {isMediumConfidence && (
+                            <span className="text-[9px] bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
+                              ⚠️ Medium Confidence
+                            </span>
+                          )}
+                          {isLowConfidence && (
+                            <span className="text-[9px] bg-rose-50 border border-rose-200 text-rose-700 px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
+                              ✕ Unsupported
+                            </span>
+                          )}
+                          {!isLowConfidence && !isMediumConfidence && (
+                            <span className="text-[9px] bg-emerald-50 border border-emerald-250 text-emerald-700 px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
+                              ✓ Supported
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Fix triggers */}
+                  {!fixResult && !isApplyingFix && (
+                    <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-300 rounded-xl p-10 bg-slate-50/50">
+                      <FileCode className="w-12 h-12 text-slate-400 mb-3" />
+                      <div className="text-xs font-bold text-slate-700 mb-1.5">No Fix Preview Generated Yet</div>
+                      <p className="text-[11px] text-slate-500 text-center max-w-sm mb-4 leading-relaxed">
+                        Trigger the AI Codebase Auto-Fix generator to create a side-by-side conflict diff comparison.
+                      </p>
+                      <button
+                        onClick={() => triggerPreviewFix(selectedViolation)}
+                        className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white text-xs shadow-md transition-all cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Generate Code Fix Preview</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Loading */}
+                  {isApplyingFix && (
+                    <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 border border-slate-200 rounded-xl p-8">
+                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600 mb-3" />
+                      <span className="text-xs font-bold text-slate-600 animate-pulse">
+                        Analyzing source AST and drafting file changes...
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Fix Error */}
+                  {fixError && (
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5">
+                      <div className="font-bold text-rose-800 text-xs flex items-center gap-2">
+                        <span>⚠️ Error generating patch:</span>
+                        <span>{fixError.message}</span>
+                      </div>
+                      <p className="text-[11px] text-rose-700 leading-relaxed">{fixError.tip}</p>
+                    </div>
+                  )}
+
+                  {/* Fix Result (WebStorm Style Diff Container) */}
+                  {fixResult && (
+                    <div className="flex-1 flex flex-col min-h-0 space-y-4 animate-in fade-in duration-300">
+                      {fixResult.stale_warning && (
+                        <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[10px] text-amber-700 font-semibold">
+                          ⚠️ Warning: This file was updated on GitHub since the last scan. Diffs might have conflict offsets.
+                        </div>
+                      )}
+
+                      {/* WebStorm Conflict resolution side-by-side layout */}
+                      <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white flex flex-col min-h-0 font-mono text-[11px] leading-5">
+                        
+                        {/* Conflict Header */}
+                        <div className="flex items-center bg-slate-100 border-b border-slate-200 px-4 py-2 flex-shrink-0 justify-between">
+                          <span className="text-[9px] text-slate-500 font-sans font-black uppercase tracking-widest">
+                            Side-by-Side Merge Compare
+                          </span>
+                          <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-sans">
+                            {fixResult.language?.toUpperCase() || "SOURCE"}
+                          </span>
+                        </div>
+
+                        {/* Side by Side editor boxes */}
+                        <div className="flex-1 grid grid-cols-2 divide-x divide-slate-200 min-h-0 overflow-hidden">
+                          {/* Original Column */}
+                          <div className="bg-[#fff8f7] flex flex-col min-h-0 overflow-hidden">
+                            <div className="flex items-center gap-1.5 px-4 py-2 bg-[#ffebe9] border-b border-[#ffd7d5] sticky top-0 flex-shrink-0">
+                              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              <span className="text-[9px] text-[#8a1c1c] font-sans font-bold uppercase tracking-widest">Before</span>
+                            </div>
+                            <div className="flex-1 overflow-auto p-4.5">
+                              <pre className="text-[#6e1e1d] whitespace-pre leading-relaxed">{fixResult.original_snippet}</pre>
+                            </div>
+                          </div>
+
+                          {/* Fixed Column */}
+                          <div className="bg-[#f6fff8] flex flex-col min-h-0 overflow-hidden">
+                            <div className="flex items-center gap-1.5 px-4 py-2 bg-[#e6ffed] border-b border-[#d1f9d8] sticky top-0 flex-shrink-0">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <span className="text-[9px] text-[#1c7a2e] font-sans font-bold uppercase tracking-widest">After</span>
+                            </div>
+                            <div className="flex-1 overflow-auto p-4.5">
+                              <pre className="text-[#1e6e2f] whitespace-pre leading-relaxed">{fixResult.fixed_snippet}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Explanation box */}
+                      {fixResult.explanation && (
+                        <div className="flex gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl flex-shrink-0">
+                          <div className="w-5 h-5 rounded-full bg-indigo-50 border border-indigo-150 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-indigo-600 text-[8px] font-black">AI</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed font-sans">{fixResult.explanation}</p>
+                        </div>
+                      )}
+
+                      {/* Action buttons footer */}
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 flex-shrink-0">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(fixResult.fixed_snippet);
+                              alert("Copied fixed snippet to clipboard!");
+                            }}
+                            className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition duration-150 cursor-pointer"
+                          >
+                            <span>📋 Copy Code</span>
+                          </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => triggerApplyLocalFix(selectedViolation)}
+                            disabled={isCreatingPR || !!createdPRInfo}
+                            className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 shadow-md shadow-indigo-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition duration-200 cursor-pointer"
+                          >
+                            {isCreatingPR ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Applying Code Changes...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>Apply Locally</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Action Feedback Results */}
+                      {createdPRInfo && (
+                        <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-[#bbf7d0] rounded-xl flex-shrink-0 animate-in zoom-in-95 duration-200">
+                          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-0.5 text-left">
+                            <div className="text-xs font-bold text-emerald-800">Local Fix Succeeded</div>
+                            <p className="text-[10px] text-emerald-900 leading-relaxed font-sans">
+                              {createdPRInfo.message || "File changes applied directly to your local workspace disk."}
+                            </p>
+                            <p className="text-[10px] text-slate-500 leading-relaxed mt-1 font-sans">
+                              Verification recommended — run <span className="font-mono text-slate-600 font-bold">git status</span> to view differences.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {prError && (
+                        <div className="flex items-start gap-3 p-4 bg-rose-50 border border-[#fecaca] rounded-xl flex-shrink-0">
+                          <div className="w-4.5 h-4.5 rounded-full bg-rose-100 border border-rose-200 flex-shrink-0 mt-0.5 flex items-center justify-center">
+                            <span className="text-rose-700 text-[9px] font-black">!</span>
+                          </div>
+                          <div className="space-y-0.5 text-left">
+                            <div className="text-xs font-bold text-rose-800">{prError.message}</div>
+                            <p className="text-[10px] text-rose-700 leading-relaxed">{prError.tip}</p>
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* SETTINGS MODAL */}
       <SettingsModal
