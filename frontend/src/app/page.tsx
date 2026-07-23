@@ -92,6 +92,20 @@ export default function Home() {
   const [aiFixText, setAiFixText] = useState<string>("");
   const [taskStatusMsg, setTaskStatusMsg] = useState<string>("");
 
+  // AI Auto-Fix (Diff & PR) State
+  const [isApplyingFix, setIsApplyingFix] = useState<boolean>(false);
+  const [fixResult, setFixResult] = useState<{
+    original_snippet: string;
+    fixed_snippet: string;
+    explanation: string;
+    stale_warning: boolean;
+    language: string;
+  } | null>(null);
+  const [fixError, setFixError] = useState<{ message: string; tip: string } | null>(null);
+  const [createdPRInfo, setCreatedPRInfo] = useState<{ branch_name: string; pr_url: string; pr_number: number; message?: string } | null>(null);
+  const [isCreatingPR, setIsCreatingPR] = useState<boolean>(false);
+  const [prError, setPrError] = useState<{ message: string; tip: string } | null>(null);
+
   // Ref for auto-scrolling inspector into view when a violation is selected
   const inspectorRef = useRef<HTMLDivElement>(null);
 
@@ -156,6 +170,10 @@ export default function Home() {
   useEffect(() => {
     setSelectedViolation(null);
     setAiFixText("");
+    setFixResult(null);
+    setFixError(null);
+    setCreatedPRInfo(null);
+    setPrError(null);
   }, [selectedRepo, publicRepoUrl, scanMode, activeTab]);
 
   // Load Repositories from backend
@@ -467,6 +485,114 @@ export default function Home() {
       setAiFixText("Error connecting to AI service.");
     } finally {
       setIsGeneratingAiFix(false);
+    }
+  };
+
+  // Resolve owner and repo for current repository
+  const getOwnerAndRepo = () => {
+    let owner = "";
+    let repo = selectedRepo;
+    if (selectedRepo.includes("/")) {
+      const parts = selectedRepo.split("/");
+      owner = parts[0];
+      repo = parts[1];
+    } else {
+      const target = repositories.find(r => r.name === selectedRepo || r.full_name === selectedRepo);
+      if (target) {
+        owner = target.owner?.login || target.full_name.split("/")[0];
+        repo = target.name;
+      }
+    }
+    return { owner, repo };
+  };
+
+  // Preview AI Code Fix
+  const triggerPreviewFix = async (v: Violation) => {
+    setIsApplyingFix(true);
+    setFixResult(null);
+    setFixError(null);
+    setCreatedPRInfo(null);
+    setPrError(null);
+
+    const { owner, repo } = getOwnerAndRepo();
+
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/review/preview-fix", {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          file_path: v.file_path,
+          rule_name: v.rule_name,
+          message: v.message,
+          severity: v.severity,
+          suggested_fix: v.suggested_fix || "",
+          code_snippet: v.code_snippet || "",
+          violation_line: v.line,
+          owner: owner || null,
+          repo: repo || null,
+          pull_number: prNumber ? parseInt(prNumber) : null,
+          installation_id: null
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setFixResult(data);
+      } else {
+        setFixError({
+          message: data.message || "Failed to generate preview fix.",
+          tip: data.tip || "Please review your LLM/Ollama settings and try again."
+        });
+      }
+    } catch (e: any) {
+      setFixError({
+        message: "Connection failed.",
+        tip: "Verify that the backend is running at http://localhost:8000."
+      });
+    } finally {
+      setIsApplyingFix(false);
+    }
+  };
+
+  // Apply Fix Locally (Option A - No Commit)
+  const triggerApplyLocalFix = async (v: Violation) => {
+    if (!fixResult) return;
+    setIsCreatingPR(true);
+    setCreatedPRInfo(null);
+    setPrError(null);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/review/apply-local-fix", {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          file_path: v.file_path,
+          original_snippet: fixResult.original_snippet,
+          fixed_code: fixResult.fixed_snippet
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setCreatedPRInfo({
+          branch_name: "", // Not used
+          pr_url: "", // Not used
+          pr_number: 0, // Not used
+          message: data.message || "Applied successfully."
+        } as any);
+      } else {
+        setPrError({
+          message: data.message || "Failed to apply local fix.",
+          tip: data.tip || "Ensure the backend has write permission to the local file."
+        });
+      }
+    } catch (e: any) {
+      setPrError({
+        message: "Connection failed.",
+        tip: "Check your backend server status."
+      });
+    } finally {
+      setIsCreatingPR(false);
     }
   };
 
@@ -893,6 +1019,150 @@ export default function Home() {
                                 {aiFixText.split("\n").map((line, idx) => (
                                   <p key={idx} className={line.trim() ? "mb-1" : ""}>{line}</p>
                                 ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* AI AUTO-FIX PREVIEW & APPLY SECTION */}
+                      {(() => {
+                        const fileExt = selectedViolation.file_path.split('.').pop()?.toLowerCase() || '';
+                        const isLowConfidence = ["c", "cpp", "rust", "swift", "php"].includes(fileExt);
+                        const isMediumConfidence = ["java", "go", "kotlin", "dart", "csharp"].includes(fileExt);
+
+                        return (
+                          <div className="border-t border-slate-200 pt-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-700">Codebase Auto-Fix</span>
+                              {isMediumConfidence && (
+                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200 font-medium">
+                                  ⚠️ Medium Confidence
+                                </span>
+                              )}
+                              {isLowConfidence && (
+                                <span className="text-[10px] bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 font-medium">
+                                  ❌ Unsupported
+                                </span>
+                              )}
+                            </div>
+
+                            {isLowConfidence ? (
+                              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 leading-normal">
+                                Auto-Fix generation is not supported or reliable for {fileExt.toUpperCase()} files. Please apply the fix advice manually in your editor.
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {isMediumConfidence && (
+                                  <p className="text-[10px] text-amber-600 leading-normal font-sans">
+                                    Note: AI fix accuracy may vary for {fileExt.toUpperCase()}. Please carefully review the previewed patch before applying.
+                                  </p>
+                                )}
+
+                                {!fixResult && !isApplyingFix && (
+                                  <button
+                                    onClick={() => triggerPreviewFix(selectedViolation)}
+                                    className="w-full flex items-center justify-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <span>🤖 Generate Code Fix Preview</span>
+                                  </button>
+                                )}
+
+                                {isApplyingFix && (
+                                  <div className="flex items-center justify-center space-x-2 py-3 text-xs text-slate-500 font-semibold bg-slate-50 rounded-xl border border-slate-200">
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                                    <span>AI generating code patch preview...</span>
+                                  </div>
+                                )}
+
+                                {fixError && (
+                                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
+                                    <div className="font-bold text-rose-800">⚠️ {fixError.message}</div>
+                                    <p className="text-[11px] text-rose-600 leading-relaxed font-sans">{fixError.tip}</p>
+                                  </div>
+                                )}
+
+                                {fixResult && (
+                                  <div className="space-y-3 animate-in fade-in duration-200">
+                                    {fixResult.stale_warning && (
+                                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 leading-normal font-medium">
+                                        ⚠️ Warning: The file has been updated on GitHub since this review was scanned. Review the diff carefully before applying.
+                                      </div>
+                                    )}
+
+                                    {/* Split Screen Diff */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 border border-slate-200 rounded-xl overflow-hidden text-[10px] font-mono bg-white shadow-inner">
+                                      <div className="bg-rose-50/40 p-2.5 overflow-x-auto border-r border-slate-100 max-h-72">
+                                        <div className="text-[9px] font-bold text-rose-700 uppercase tracking-wider mb-1.5 border-b border-rose-100 pb-1">Original</div>
+                                        <pre className="text-rose-900 whitespace-pre">{fixResult.original_snippet}</pre>
+                                      </div>
+                                      <div className="bg-emerald-50/40 p-2.5 overflow-x-auto max-h-72">
+                                        <div className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 border-b border-emerald-100 pb-1">AI Corrected</div>
+                                        <pre className="text-emerald-900 whitespace-pre">{fixResult.fixed_snippet}</pre>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Bar */}
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(fixResult.fixed_snippet);
+                                          alert("Copied fixed snippet to clipboard!");
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 shadow-sm transition"
+                                      >
+                                        <span>📋 Copy Code</span>
+                                      </button>
+                                      
+                                      <button
+                                        onClick={() => triggerApplyLocalFix(selectedViolation)}
+                                        disabled={isCreatingPR || !!createdPRInfo}
+                                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md disabled:opacity-50 transition"
+                                      >
+                                        {isCreatingPR ? (
+                                          <>
+                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                            <span>Applying...</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Sparkles className="w-3 h-3" />
+                                            <span>🚀 Apply Fix Locally</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+
+                                    {fixResult.explanation && (
+                                      <p className="text-[11px] text-slate-500 leading-normal italic font-sans bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                        💡 <strong>Architect explanation:</strong> {fixResult.explanation}
+                                      </p>
+                                    )}
+
+                                    {createdPRInfo && (
+                                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1.5 shadow-sm animate-in zoom-in-95 duration-200">
+                                        <div className="font-bold flex items-center gap-1.5 text-emerald-800">
+                                          <CheckCircle className="w-4 h-4 text-emerald-600" />
+                                          <span>Local File Updated!</span>
+                                        </div>
+                                        <p className="text-[11px] text-emerald-900 font-sans leading-relaxed">
+                                          {createdPRInfo.message || "The architectural correction has been written to the local file successfully."}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 leading-normal mt-1 font-sans">
+                                          Check your local IDE (e.g. VS Code or `git diff`) to inspect the unstaged changes.
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {prError && (
+                                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
+                                        <div className="font-bold text-rose-800">⚠️ {prError.message}</div>
+                                        <p className="text-[11px] text-rose-600 font-sans leading-relaxed">{prError.tip}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
