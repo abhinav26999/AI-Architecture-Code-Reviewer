@@ -320,10 +320,11 @@ class AIClient:
         
         system_prompt = (
             "You are an expert AI Principal Software Architect.\n"
-            "Your objective is to modify the provided source code block to resolve a specific architectural or performance violation.\n\n"
+            "Your objective is to modify the provided source code context to resolve a specific architectural or performance violation.\n"
+            "You MUST return the entire context block provided in the prompt, with the violation fixed. Do not truncate, omit, or replace lines with comments (like '# ...' or '# rest of code'). Keep all other code, functions, and formatting in the context block exactly identical.\n\n"
             "You MUST format your output EXACTLY as follows. Do not add any text before, after, or between the sections:\n\n"
             "[PATCH_START]\n"
-            "<only the corrected code block here>\n"
+            "<only the corrected code context block here>\n"
             "[PATCH_END]\n\n"
             "[EXPLANATION_START]\n"
             "<one sentence explaining what was changed and why>\n"
@@ -337,9 +338,9 @@ class AIClient:
             f"Severity: {severity}\n"
             f"Violation Message: {violation_message}\n"
             + (f"Refactoring Guidance: {suggested_fix}\n\n" if suggested_fix else "")
-            + f"Original Code Snippet Context:\n"
+            + f"Original Code Context:\n"
             f"```\n{code_context}\n```\n\n"
-            "Please output the corrected block of code replacing the violation."
+            "Please output the entire corrected block of code replacing the Original Code Context above in its entirety."
         )
 
         # Call LLM provider

@@ -153,9 +153,13 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
-    async def get_pull_request(self, installation_id: int, owner: str, repo: str, pull_number: int) -> Dict[str, Any]:
+    async def get_pull_request(self, installation_id: Optional[int], owner: str, repo: str, pull_number: int, github_token: Optional[str] = None) -> Dict[str, Any]:
         """Fetches detailed information for a single pull request."""
-        token = await self.get_installation_token(installation_id)
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -177,9 +181,13 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
-    async def list_pull_requests(self, installation_id: int, owner: str, repo: str) -> List[Dict[str, Any]]:
+    async def list_pull_requests(self, installation_id: Optional[int], owner: str, repo: str, github_token: Optional[str] = None) -> List[Dict[str, Any]]:
         """Lists open pull requests for a specific repository."""
-        token = await self.get_installation_token(installation_id)
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -201,9 +209,13 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
-    async def get_pull_request_files(self, installation_id: int, owner: str, repo: str, pull_number: int) -> List[Dict[str, Any]]:
+    async def get_pull_request_files(self, installation_id: Optional[int], owner: str, repo: str, pull_number: int, github_token: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetches the list of files modified in a pull request, including diff patches."""
-        token = await self.get_installation_token(installation_id)
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
