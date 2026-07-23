@@ -261,6 +261,187 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
 
+    async def get_file_content(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        ref: Optional[str] = None,
+        installation_id: Optional[int] = None,
+        github_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Reads original code content and file SHA from GitHub Contents API."""
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+
+        url = f"{self.base_url}/repos/{owner}/{repo}/contents/{path}"
+        params = {}
+        if ref:
+            params["ref"] = ref
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(url, headers=headers, params=params)
+                if response.status_code == 401:
+                    raise GitHubAPIError("GitHub token is invalid or expired.", status_code=401)
+                elif response.status_code == 403:
+                    raise GitHubAPIError("Access denied: token lacks read access to this repo.", status_code=403)
+                elif response.status_code == 404:
+                    raise GitHubAPIError("File not found — it may have been deleted or renamed on this branch.", status_code=404)
+                elif response.status_code == 429:
+                    raise GitHubAPIError("GitHub API rate limit reached. Wait a few minutes and try again.", status_code=429)
+                elif response.status_code not in (200, 201):
+                    raise GitHubAPIError(f"Failed to fetch file content: {response.text}", status_code=response.status_code)
+                
+                data = response.json()
+                import base64
+                encoded_content = data.get("content", "")
+                # GitHub returns base64 content with newlines, strip them
+                decoded_content = base64.b64decode(encoded_content.replace("\n", "")).decode("utf-8", errors="ignore")
+                
+                return {
+                    "content": decoded_content,
+                    "sha": data.get("sha", "")
+                }
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
+    async def create_branch(
+        self,
+        owner: str,
+        repo: str,
+        new_branch: str,
+        base_sha: str,
+        installation_id: Optional[int] = None,
+        github_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Creates a new branch (Git ref) pointing to a base branch SHA."""
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+
+        url = f"{self.base_url}/repos/{owner}/{repo}/git/refs"
+        payload = {
+            "ref": f"refs/heads/{new_branch}",
+            "sha": base_sha
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code == 422:
+                    raise GitHubAPIError(f"Branch '{new_branch}' already exists or ref is invalid.", status_code=422)
+                elif response.status_code not in (200, 201):
+                    raise GitHubAPIError(f"Failed to create branch: {response.text}", status_code=response.status_code)
+                return response.json()
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
+    async def commit_file_change(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        content: str,
+        sha: str,
+        branch: str,
+        message: str,
+        installation_id: Optional[int] = None,
+        github_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Commits updated content directly to a specific branch via GitHub Contents API."""
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+
+        import base64
+        encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        
+        url = f"{self.base_url}/repos/{owner}/{repo}/contents/{path}"
+        payload = {
+            "message": message,
+            "content": encoded_content,
+            "sha": sha,
+            "branch": branch
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.put(url, headers=headers, json=payload)
+                if response.status_code == 409:
+                    raise GitHubAPIError("Conflict: The file has changed since the scan. Please refresh and try again.", status_code=409)
+                elif response.status_code not in (200, 201):
+                    raise GitHubAPIError(f"Failed to commit file change: {response.text}", status_code=response.status_code)
+                return response.json()
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
+    async def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        head_branch: str,
+        base_branch: str,
+        installation_id: Optional[int] = None,
+        github_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Creates a Pull Request targeting a base branch."""
+        if github_token and github_token.strip():
+            token = github_token.strip()
+        else:
+            token = await self.get_installation_token(installation_id)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Architecture-Code-Reviewer",
+        }
+
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
+        payload = {
+            "title": title,
+            "body": body,
+            "head": head_branch,
+            "base": base_branch
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code not in (200, 201):
+                    raise GitHubAPIError(f"Failed to create Pull Request: {response.text}", status_code=response.status_code)
+                return response.json()
+            except httpx.HTTPError as e:
+                raise GitHubAPIError(f"Connection error to GitHub: {str(e)}")
+
 
 # Singleton instance
 github_client = GitHubClient()

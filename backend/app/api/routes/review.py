@@ -444,6 +444,561 @@ async def generate_ai_fix_suggestion(request: FixSuggestionRequest, raw_request:
         }
 
 
+from fastapi.responses import JSONResponse
+import re
+import random
+
+# Confidence Tiers
+LOW_CONFIDENCE_LANGS = {"c", "cpp", "rust", "swift", "php"}
+MEDIUM_CONFIDENCE_LANGS = {"java", "go", "kotlin", "dart", "csharp"}
+
+def slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "-", text)
+    return text
+
+def get_context_window(content: str, line_number: Optional[int], snippet: Optional[str]) -> str:
+    lines = content.splitlines()
+    total_lines = len(lines)
+    
+    # Determine target line (1-indexed)
+    target_line = 1
+    if line_number and 1 <= line_number <= total_lines:
+        target_line = line_number
+    elif snippet:
+        # Find where the snippet matches in the file
+        clean_snippet = snippet.strip().replace("\r\n", "\n")
+        try:
+            idx = content.replace("\r\n", "\n").find(clean_snippet)
+            if idx != -1:
+                target_line = content[:idx].count("\n") + 1
+        except Exception:
+            pass
+
+    # Extract 20 lines before and after
+    start_idx = max(0, target_line - 21)
+    end_idx = min(total_lines, target_line + 20)
+    
+    context_lines = lines[start_idx:end_idx]
+    
+    # Prepend first 15 lines of the file for imports/class declarations
+    prefix_lines = lines[0:min(15, total_lines)]
+    
+    if start_idx < 15:
+        # Overlap! Just return 0 to end_idx
+        result_lines = lines[0:end_idx]
+    else:
+        result_lines = prefix_lines + ["... [snip] ..."] + context_lines
+        
+    return "\n".join(result_lines)
+
+
+def find_local_workspace_root() -> str:
+    # Start from current directory and go up until we find rules.md or backend/
+    current = os.path.abspath(os.getcwd())
+    for _ in range(4):
+        if os.path.exists(os.path.join(current, "rules.md")) or os.path.exists(os.path.join(current, "backend")):
+            return current
+        current = os.path.dirname(current)
+    return os.path.abspath(os.getcwd())
+
+def apply_patch_to_content(content: str, original_snippet: str, fixed_snippet: str) -> str:
+    # Normalize line endings
+    content_norm = content.replace("\r\n", "\n")
+    orig_norm = original_snippet.replace("\r\n", "\n")
+    fixed_norm = fixed_snippet.replace("\r\n", "\n")
+    
+    if orig_norm in content_norm:
+        return content_norm.replace(orig_norm, fixed_norm)
+    
+    # Fallback: if there are whitespace variations, try strip matching
+    orig_strip = orig_norm.strip()
+    if orig_strip in content_norm:
+        return content_norm.replace(orig_strip, fixed_norm)
+        
+    raise ValueError("Could not find the original code snippet in the file to apply the fix.")
+
+
+class ApplyFixRequest(BaseModel):
+    file_path: str
+    rule_name: str
+    message: str
+    severity: Optional[str] = "HIGH"
+    suggested_fix: Optional[str] = None
+    code_snippet: Optional[str] = None
+    violation_line: Optional[int] = None
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+    pull_number: Optional[int] = None
+    installation_id: Optional[int] = None
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    ollama_url: Optional[str] = None
+
+
+class ApplyLocalFixRequest(BaseModel):
+    file_path: str
+    original_snippet: str
+    fixed_code: str
+    local_workspace_path: Optional[str] = None
+
+
+class CreateFixPRRequest(BaseModel):
+    file_path: str
+    fixed_code: str
+    rule_name: str
+    message: str
+    owner: str
+    repo: str
+    pull_number: Optional[int] = None
+    installation_id: Optional[int] = None
+    base_branch: Optional[str] = None
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    ollama_url: Optional[str] = None
+
+
+@router.post("/preview-fix")
+async def preview_fix_suggestion(request: ApplyFixRequest, raw_request: Request):
+    """
+    Validates language safety, fetches file contents (local workspace or GitHub fallback),
+    detects if file has changed since scan, requests AI to generate a corrected block,
+    and returns a structured side-by-side diff payload.
+    """
+    # 1. Language Safety check
+    ext = request.file_path.rsplit(".", 1)[-1].lower() if "." in request.file_path else "unknown"
+    if ext in LOW_CONFIDENCE_LANGS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": True,
+                "code": "LOW_CONFIDENCE_LANGUAGE",
+                "message": f"AI Auto-Fix is not reliable for the '{ext.upper()}' language.",
+                "tip": "Please apply manual refactoring to address this violation."
+            }
+        )
+
+    # 2. Get GitHub token/installation ID
+    github_token = raw_request.headers.get("x-github-token")
+    inst_id = None
+    if not github_token:
+        try:
+            inst_id = await get_effective_installation_id(request.installation_id)
+        except Exception:
+            pass
+
+    # 3. Resolve Branch/Ref if PR is provided
+    ref = None
+    if request.pull_number and request.owner and request.repo:
+        try:
+            pr_data = await github_client.get_pull_request(
+                installation_id=inst_id,
+                owner=request.owner,
+                repo=request.repo,
+                pull_number=request.pull_number,
+                github_token=github_token
+            )
+            ref = pr_data.get("head", {}).get("ref")
+        except Exception as e:
+            logger.error(f"Failed to fetch PR info in preview-fix: {e}")
+
+    # 4. Fetch Original Code Content
+    original_content = None
+    stale_warning = False
+    
+    # Try reading from local workspace first
+    local_workspace_path = raw_request.headers.get("x-local-workspace-path")
+    if not local_workspace_path:
+        local_workspace_path = find_local_workspace_root()
+        
+    local_file_path = os.path.join(local_workspace_path, request.file_path)
+    if os.path.exists(local_file_path):
+        try:
+            with open(local_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                original_content = f.read()
+            logger.info(f"Loaded original content locally from {local_file_path}")
+            
+            # Detect Stale File: check if code_snippet exists in current local file
+            if request.code_snippet and request.code_snippet.strip():
+                clean_snippet = request.code_snippet.strip().replace("\r\n", "\n")
+                clean_content = original_content.replace("\r\n", "\n")
+                if clean_snippet not in clean_content:
+                    stale_warning = True
+        except Exception as e:
+            logger.warning(f"Could not read local file {local_file_path}: {e}")
+
+    # Fallback to GitHub contents fetch
+    if not original_content and request.owner and request.repo:
+        try:
+            file_data = await github_client.get_file_content(
+                owner=request.owner,
+                repo=request.repo,
+                path=request.file_path,
+                ref=ref,
+                installation_id=inst_id,
+                github_token=github_token
+            )
+            original_content = file_data.get("content", "")
+            
+            # Detect Stale File
+            if request.code_snippet and request.code_snippet.strip():
+                clean_snippet = request.code_snippet.strip().replace("\r\n", "\n")
+                clean_content = original_content.replace("\r\n", "\n")
+                if clean_snippet not in clean_content:
+                    stale_warning = True
+        except Exception as e:
+            logger.warning(f"Could not fetch file content from GitHub: {e}")
+
+    # Fallback to snippet from violation if both failed
+    if not original_content:
+        if request.code_snippet and request.code_snippet.strip():
+            original_content = request.code_snippet
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": True,
+                    "code": "GITHUB_FETCH_FAILED",
+                    "message": f"Could not retrieve file '{request.file_path}' content from disk/GitHub and no fallback code snippet was provided.",
+                    "tip": "Verify your project path, branch settings, or file permissions."
+                }
+            )
+
+    # 5. Extract smart context window
+    code_context = get_context_window(original_content, request.violation_line, request.code_snippet)
+
+    # 6. Call AI Client to generate fix
+    provider = request.provider or raw_request.headers.get("x-llm-provider")
+    api_key = request.api_key or raw_request.headers.get("x-api-key")
+    model = request.model or raw_request.headers.get("x-ollama-model")
+    ollama_url = request.ollama_url or raw_request.headers.get("x-ollama-url")
+
+    # Map ext to friendly name
+    lang_map = {
+        "py": "Python", "ts": "TypeScript", "tsx": "TypeScript/React",
+        "js": "JavaScript", "jsx": "JavaScript/React", "dart": "Dart/Flutter",
+        "java": "Java", "kt": "Kotlin", "swift": "Swift", "go": "Go",
+        "rs": "Rust", "cs": "C#", "rb": "Ruby", "php": "PHP", "cpp": "C++", "c": "C",
+    }
+    lang = lang_map.get(ext, ext.upper())
+
+    try:
+        fix_result = await ai_client.generate_code_fix(
+            file_path=request.file_path,
+            code_context=code_context,
+            violation_message=request.message,
+            rule_name=request.rule_name,
+            severity=request.severity or "HIGH",
+            suggested_fix=request.suggested_fix,
+            language=lang,
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            ollama_url=ollama_url
+        )
+        
+        return {
+            "original_snippet": request.code_snippet or original_content,
+            "fixed_snippet": fix_result["fixed_code"],
+            "explanation": fix_result["explanation"],
+            "stale_warning": stale_warning,
+            "language": ext
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate code fix: {e}")
+        
+        err_msg = str(e)
+        code = "LLM_FAILED"
+        tip = "Try switching your LLM provider to Gemini or OpenAI in Settings, or check if Ollama is running locally."
+        
+        if "rate limit" in err_msg.lower() or "429" in err_msg:
+            code = "RATE_LIMITED"
+            tip = "Rate limit reached. Wait 30 seconds and try again, or switch to a different LLM provider in Settings."
+        elif "delimiters" in err_msg.lower() or "tag" in err_msg.lower():
+            code = "NO_STRUCTURED_OUTPUT"
+            tip = "The AI failed to return a cleanly delimited code patch. Click Preview again to retry."
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "code": code,
+                "message": f"AI Auto-Fix generation failed: {err_msg}",
+                "tip": tip
+            }
+        )
+
+
+@router.post("/apply-local-fix")
+async def apply_local_fix(request: ApplyLocalFixRequest, raw_request: Request):
+    """
+    Applies the AI-generated code fix directly to the local workspace file on disk.
+    Does not commit to git.
+    """
+    local_workspace_path = raw_request.headers.get("x-local-workspace-path")
+    if not local_workspace_path:
+        local_workspace_path = find_local_workspace_root()
+        
+    local_file_path = os.path.abspath(os.path.join(local_workspace_path, request.file_path))
+    
+    # Security check: ensure path is within workspace
+    if not local_file_path.startswith(os.path.abspath(local_workspace_path)):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": True,
+                "code": "INVALID_PATH",
+                "message": "The resolved file path is outside the workspace directory.",
+                "tip": "Ensure the file path is relative to the repository root."
+            }
+        )
+
+    if not os.path.exists(local_file_path):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": True,
+                "code": "FILE_NOT_FOUND",
+                "message": f"Could not find file on local disk: {request.file_path}",
+                "tip": f"Expected location: {local_file_path}. Verify your workspace configuration."
+            }
+        )
+
+    try:
+        with open(local_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+            
+        updated_content = apply_patch_to_content(content, request.original_snippet, request.fixed_code)
+        
+        with open(local_file_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+            
+        return {
+            "status": "success",
+            "message": f"Successfully applied changes locally to '{request.file_path}' (unstaged).",
+            "file_path": request.file_path,
+            "absolute_path": local_file_path
+        }
+    except ValueError as ve:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": True,
+                "code": "PATCH_FAILED",
+                "message": str(ve),
+                "tip": "The original code may have been modified since the scan. Please refresh and try again."
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to apply local fix: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "code": "WRITE_FAILED",
+                "message": f"Failed to write changes to local disk: {str(e)}",
+                "tip": "Check if you have write permission for this file."
+            }
+        )
+
+
+@router.post("/create-fix-pr")
+async def create_fix_pr(request: CreateFixPRRequest, raw_request: Request):
+    """
+    Creates a new branch on GitHub, commits the fixed code snippet, and opens a Pull Request.
+    """
+    github_token = raw_request.headers.get("x-github-token")
+    inst_id = None
+    if not github_token:
+        try:
+            inst_id = await get_effective_installation_id(request.installation_id)
+        except Exception:
+            pass
+
+    # 1. Resolve Target/Base Branch and base SHA
+    base_branch = request.base_branch
+    base_sha = None
+
+    if request.pull_number:
+        try:
+            pr_data = await github_client.get_pull_request(
+                installation_id=inst_id,
+                owner=request.owner,
+                repo=request.repo,
+                pull_number=request.pull_number,
+                github_token=github_token
+            )
+            # We want to branch off the head of the PR (nested PR)
+            base_branch = pr_data.get("head", {}).get("ref")
+            base_sha = pr_data.get("head", {}).get("sha")
+        except Exception as e:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": True,
+                    "code": "GITHUB_FETCH_FAILED",
+                    "message": f"Failed to retrieve pull request info for PR #{request.pull_number}: {str(e)}",
+                    "tip": "Check your network connection and token permissions."
+                }
+            )
+    else:
+        # Default target branch (main/master) if base_branch is not passed
+        if not base_branch:
+            base_branch = "main"
+        
+        # Get base branch latest commit SHA
+        try:
+            token = github_token or await github_client.get_installation_token(inst_id)
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "AI-Architecture-Code-Reviewer",
+            }
+            async with httpx.AsyncClient() as client:
+                url = f"https://api.github.com/repos/{request.owner}/{request.repo}/git/ref/heads/{base_branch}"
+                res = await client.get(url, headers=headers)
+                if res.status_code == 200:
+                    base_sha = res.json().get("object", {}).get("sha")
+                else:
+                    # Retry with master
+                    if base_branch == "main":
+                        url_alt = f"https://api.github.com/repos/{request.owner}/{request.repo}/git/ref/heads/master"
+                        res_alt = await client.get(url_alt, headers=headers)
+                        if res_alt.status_code == 200:
+                            base_branch = "master"
+                            base_sha = res_alt.json().get("object", {}).get("sha")
+            
+            if not base_sha:
+                raise ValueError(f"Could not resolve branch '{base_branch}' SHA")
+        except Exception as e:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": True,
+                    "code": "GITHUB_FETCH_FAILED",
+                    "message": f"Could not locate base branch '{base_branch}': {str(e)}",
+                    "tip": "Verify the branch name exists on GitHub."
+                }
+            )
+
+    # 2. Generate Safe Branch Name
+    branch_slug = slugify(request.rule_name)[:30]
+    rand_id = random.randint(1000, 9999)
+    new_branch = f"ai-fix/{branch_slug}-{rand_id}"
+
+    # 3. Create Branch
+    try:
+        await github_client.create_branch(
+            owner=request.owner,
+            repo=request.repo,
+            new_branch=new_branch,
+            base_sha=base_sha,
+            installation_id=inst_id,
+            github_token=github_token
+        )
+    except GitHubAPIError as gae:
+        return JSONResponse(
+            status_code=gae.status_code,
+            content={
+                "error": True,
+                "code": "BRANCH_CREATION_FAILED",
+                "message": f"Failed to create new branch '{new_branch}': {str(gae)}",
+                "tip": "Check if target branch protection rules block branch creation by the app."
+            }
+        )
+
+    # 4. Fetch target file's current SHA on the new branch to prepare for update
+    file_sha = ""
+    try:
+        file_data = await github_client.get_file_content(
+            owner=request.owner,
+            repo=request.repo,
+            path=request.file_path,
+            ref=new_branch,
+            installation_id=inst_id,
+            github_token=github_token
+        )
+        file_sha = file_data.get("sha", "")
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": True,
+                "code": "GITHUB_FETCH_FAILED",
+                "message": f"Failed to fetch original file hash from new branch '{new_branch}': {str(e)}",
+                "tip": "Verify that file exists in the repo and path is correct."
+            }
+        )
+
+    # 5. Commit change to new branch
+    commit_msg = f"style(arch): auto-fix {request.rule_name} in {request.file_path.split('/')[-1]} [AI]"
+    try:
+        await github_client.commit_file_change(
+            owner=request.owner,
+            repo=request.repo,
+            path=request.file_path,
+            content=request.fixed_code,
+            sha=file_sha,
+            branch=new_branch,
+            message=commit_msg,
+            installation_id=inst_id,
+            github_token=github_token
+        )
+    except GitHubAPIError as gae:
+        return JSONResponse(
+            status_code=gae.status_code,
+            content={
+                "error": True,
+                "code": "COMMIT_FAILED",
+                "message": f"Could not commit changes to branch '{new_branch}': {str(gae)}",
+                "tip": "The file might have been modified concurrently. Try scanning again."
+            }
+        )
+
+    # 6. Open Pull Request targeting base_branch
+    pr_title = f"🤖 [AI Fix] Resolve {request.rule_name} in {request.file_path.split('/')[-1]}"
+    pr_body = (
+        f"### 🤖 Automated Architecture Fix\n\n"
+        f"This Pull Request applies the suggested architectural refactoring to fix the following violation:\n"
+        f"- **Violation**: {request.rule_name}\n"
+        f"- **File**: `{request.file_path}`\n"
+        f"- **Details**: {request.message}\n\n"
+        f"Please review the diff and run tests before merging."
+    )
+
+    try:
+        pr_data = await github_client.create_pull_request(
+            owner=request.owner,
+            repo=request.repo,
+            title=pr_title,
+            body=pr_body,
+            head_branch=new_branch,
+            base_branch=base_branch,
+            installation_id=inst_id,
+            github_token=github_token
+        )
+        return {
+            "status": "success",
+            "branch_name": new_branch,
+            "pr_url": pr_data.get("html_url", ""),
+            "pr_number": pr_data.get("number", 0)
+        }
+    except GitHubAPIError as gae:
+        return JSONResponse(
+            status_code=gae.status_code,
+            content={
+                "error": True,
+                "code": "PR_CREATION_FAILED",
+                "message": f"Branch was created and changes committed, but failed to open PR: {str(gae)}",
+                "tip": f"You can open the Pull Request manually on GitHub from the branch '{new_branch}'."
+            }
+        )
+
+
 # ==============================================================================
 # Async Background Task Endpoints (Celery + Redis)
 # ==============================================================================

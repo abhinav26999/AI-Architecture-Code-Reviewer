@@ -37,7 +37,7 @@ class AIClient:
             "### 🔍 Critical Issues & Violations\n"
             "- Detail specific code anti-patterns, layer boundary breaches, N+1 query loops, or security flaws found in the diffs.\n\n"
             "### 💡 Actionable Refactoring & Fixes\n"
-            "- Provide clear code snippets showing exact refactorings to fix identified concerns.\n\n"
+            "- Provide clear code snippets showing exact refactorings to fix identified concerns. When recommending line-level fixes, use GitHub-native suggestion blocks (e.g. ```suggestion \\n <new code> \\n ```) so developers can commit them with a single click.\n\n"
             "Maintain a technical, constructive, and objective tone."
         )
 
@@ -296,6 +296,125 @@ class AIClient:
             )
         except Exception:
             return f"Refactor '{file_path}' to resolve {rule_name}: extract database loops into batch calls or replace blocking calls with async alternatives."
+
+    async def generate_code_fix(
+        self,
+        file_path: str,
+        code_context: str,
+        violation_message: str,
+        rule_name: str,
+        severity: str,
+        suggested_fix: Optional[str] = None,
+        language: Optional[str] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        ollama_url: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        Calls LLM to generate the code fix and parses the response to return
+        { "fixed_code": str, "explanation": str } using strict delimiter matching.
+        """
+        llm_provider = (provider or settings.LLM_PROVIDER).lower().strip()
+        lang = language or "code"
+        
+        system_prompt = (
+            "You are an expert AI Principal Software Architect.\n"
+            "Your objective is to modify the provided source code block to resolve a specific architectural or performance violation.\n\n"
+            "You MUST format your output EXACTLY as follows. Do not add any text before, after, or between the sections:\n\n"
+            "[PATCH_START]\n"
+            "<only the corrected code block here>\n"
+            "[PATCH_END]\n\n"
+            "[EXPLANATION_START]\n"
+            "<one sentence explaining what was changed and why>\n"
+            "[EXPLANATION_END]"
+        )
+
+        user_prompt = (
+            f"File Path: {file_path}\n"
+            f"Language: {lang}\n"
+            f"Violation Type: {rule_name}\n"
+            f"Severity: {severity}\n"
+            f"Violation Message: {violation_message}\n"
+            + (f"Refactoring Guidance: {suggested_fix}\n\n" if suggested_fix else "")
+            + f"Original Code Snippet Context:\n"
+            f"```\n{code_context}\n```\n\n"
+            "Please output the corrected block of code replacing the violation."
+        )
+
+        # Call LLM provider
+        try:
+            if llm_provider == "openai":
+                response_text = await self._generate_openai_review(
+                    api_key=api_key,
+                    model=model or "gpt-4o-mini",
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            elif llm_provider == "gemini":
+                response_text = await self._generate_gemini_review(
+                    api_key=api_key,
+                    model=model or "gemini-1.5-flash",
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            elif llm_provider == "ollama":
+                response_text = await self._generate_ollama_review(
+                    model=model or settings.OLLAMA_GEN_MODEL,
+                    ollama_url=ollama_url or settings.OLLAMA_GEN_URL,
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+            else:
+                raise ValueError(f"Unsupported LLM provider '{llm_provider}'")
+        except Exception as e:
+            logger.error(f"LLM fix generation failed: {e}")
+            raise RuntimeError(f"LLM Auto-Fix Generation Failed ({llm_provider.upper()}): {str(e)}")
+
+        # Post-process response to extract delimited parts
+        fixed_code = self._extract_delimited_block(response_text, "[PATCH_START]", "[PATCH_END]")
+        explanation = self._extract_delimited_block(response_text, "[EXPLANATION_START]", "[EXPLANATION_END]")
+
+        if fixed_code is None:
+            # Fallback in case the LLM did not include the tags but returned raw code
+            if "[PATCH_START]" not in response_text and "[PATCH_END]" not in response_text:
+                # Strip markdown code blocks
+                fixed_code = self._strip_markdown_fences(response_text)
+                explanation = "Applied architectural correction to resolve the violation."
+            else:
+                raise ValueError("AI response did not contain valid [PATCH_START] and [PATCH_END] tags.")
+        else:
+            fixed_code = self._strip_markdown_fences(fixed_code)
+
+        if not explanation:
+            explanation = "Applied architectural correction."
+
+        return {
+            "fixed_code": fixed_code,
+            "explanation": explanation
+        }
+
+    def _extract_delimited_block(self, text: str, start_tag: str, end_tag: str) -> Optional[str]:
+        """Extracts content between custom delimiter tags."""
+        try:
+            if start_tag not in text or end_tag not in text:
+                return None
+            start_idx = text.index(start_tag) + len(start_tag)
+            end_idx = text.index(end_tag)
+            return text[start_idx:end_idx].strip()
+        except Exception:
+            return None
+
+    def _strip_markdown_fences(self, text: str) -> str:
+        """Strips markdown code block backticks (e.g. ```python ... ```) if present."""
+        lines = text.strip().splitlines()
+        if not lines:
+            return text
+        if lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
 
 
 # Singleton instance
